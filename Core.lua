@@ -1,4 +1,4 @@
-Stablemaster.Debug("Core.lua loading...")
+Stablemaster.Debug("Core.lua loading.")
 
 Stablemaster.runtime = Stablemaster.runtime or {
     activePackName = nil,
