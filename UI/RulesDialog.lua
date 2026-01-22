@@ -9,6 +9,17 @@ local function EnsureConditions(pack)
     pack.conditions = pack.conditions or {}
 end
 
+-- Check if a pack already has a rule of a specific type
+local function HasRuleOfType(pack, ruleType)
+    if not pack or not pack.conditions then return false end
+    for _, rule in ipairs(pack.conditions) do
+        if rule.type == ruleType then
+            return true
+        end
+    end
+    return false
+end
+
 local function UpdateZoneDisplay(dlg)
     if not dlg.zoneText then return end
     
@@ -303,6 +314,19 @@ local function RebuildRulesList(container, pack)
             local seasonNames = rule.seasonNames or {}
             local displayText = #seasonNames > 0 and table.concat(seasonNames, ", ") or "No seasons"
             text:SetText("Season: " .. displayText)
+        elseif rule.type == "no_flying" then
+            -- No flying rule
+            text:SetText("No Flying Zone")
+        elseif rule.type == "in_party" then
+            -- In party rule
+            text:SetText("In Party")
+        elseif rule.type == "in_raid" then
+            -- In raid rule
+            text:SetText("In Raid")
+        elseif rule.type == "instance" then
+            -- Instance rule
+            local instanceName = rule.instanceName or ("Instance " .. tostring(rule.instanceID))
+            text:SetText("Instance: " .. instanceName)
         else
             text:SetText("Unknown rule type")
         end
@@ -596,6 +620,43 @@ function StablemasterUI.ShowRulesDialog(pack)
                 end
                 UIDropDownMenu_AddButton(info, level)
 
+                info.text = "No Flying Zone"
+                info.func = function()
+                    CloseDropDownMenus()
+                    if not dlg.targetPack then return end
+
+                    -- Check if rule already exists
+                    if HasRuleOfType(dlg.targetPack, "no_flying") then
+                        Stablemaster.Print("This pack already has a No Flying Zone rule.")
+                        return
+                    end
+
+                    EnsureConditions(dlg.targetPack)
+                    table.insert(dlg.targetPack.conditions, {
+                        type = "no_flying",
+                    })
+
+                    Stablemaster.VerbosePrint("Added no flying rule.")
+                    RebuildRulesList(dlg.rulesList, dlg.targetPack)
+                    C_Timer.After(0.1, Stablemaster.SelectActivePack)
+                    if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                        _G.StablemasterMainFrame.packPanel.refreshPacks()
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+
+                info.text = "Dungeon..."
+                info.func = function()
+                    CloseDropDownMenus()
+                    if dlg.instancePicker then
+                        dlg.instancePicker:Show()
+                    else
+                        dlg.instancePicker = StablemasterUI.CreateInstancePicker(dlg)
+                        dlg.instancePicker:Show()
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+
                 -- Separator
                 info.text = ""
                 info.isTitle = true
@@ -630,6 +691,69 @@ function StablemasterUI.ShowRulesDialog(pack)
                     else
                         dlg.racePicker = StablemasterUI.CreateRacePicker(dlg)
                         dlg.racePicker:Show()
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+
+                -- Separator
+                info.text = ""
+                info.isTitle = true
+                UIDropDownMenu_AddButton(info, level)
+
+                -- Group category
+                info.text = "|cFF00FF96Group|r"
+                info.isTitle = true
+                UIDropDownMenu_AddButton(info, level)
+
+                info.isTitle = false
+                info.disabled = false
+
+                info.text = "In Party"
+                info.func = function()
+                    CloseDropDownMenus()
+                    if not dlg.targetPack then return end
+
+                    -- Check if rule already exists
+                    if HasRuleOfType(dlg.targetPack, "in_party") then
+                        Stablemaster.Print("This pack already has an In Party rule.")
+                        return
+                    end
+
+                    EnsureConditions(dlg.targetPack)
+                    table.insert(dlg.targetPack.conditions, {
+                        type = "in_party",
+                    })
+
+                    Stablemaster.VerbosePrint("Added in party rule.")
+                    RebuildRulesList(dlg.rulesList, dlg.targetPack)
+                    C_Timer.After(0.1, Stablemaster.SelectActivePack)
+                    if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                        _G.StablemasterMainFrame.packPanel.refreshPacks()
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+
+                info.text = "In Raid"
+                info.func = function()
+                    CloseDropDownMenus()
+                    if not dlg.targetPack then return end
+
+                    -- Check if rule already exists
+                    if HasRuleOfType(dlg.targetPack, "in_raid") then
+                        Stablemaster.Print("This pack already has an In Raid rule.")
+                        return
+                    end
+
+                    EnsureConditions(dlg.targetPack)
+                    table.insert(dlg.targetPack.conditions, {
+                        type = "in_raid",
+                    })
+
+                    Stablemaster.VerbosePrint("Added in raid rule.")
+                    RebuildRulesList(dlg.rulesList, dlg.targetPack)
+                    C_Timer.After(0.1, Stablemaster.SelectActivePack)
+                    if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                        _G.StablemasterMainFrame.packPanel.refreshPacks()
                     end
                 end
                 UIDropDownMenu_AddButton(info, level)
@@ -1352,6 +1476,312 @@ function StablemasterUI.CreateZonePicker(parentDialog)
 
     picker:Hide()
     table.insert(UISpecialFrames, "StablemasterZonePicker")
+    return picker
+end
+
+-- Instance (Dungeon) Picker Dialog
+function StablemasterUI.CreateInstancePicker(parentDialog)
+    local picker = CreateFrame("Frame", "StablemasterInstancePicker", UIParent, "BackdropTemplate")
+    picker:SetSize(450, 400)
+    picker:SetPoint("CENTER", parentDialog, "CENTER", 50, 0)
+    picker:SetMovable(true)
+    picker:EnableMouse(true)
+    picker:EnableKeyboard(true)
+    picker:SetFrameStrata("FULLSCREEN_DIALOG")
+    picker:SetFrameLevel(parentDialog:GetFrameLevel() + 1)
+    StablemasterUI.CreateDialogBackdrop(picker)
+
+    -- Intercept ESC to close just this dialog
+    picker:SetScript("OnKeyDown", function(self, key)
+        if key == "ESCAPE" then
+            self:Hide()
+            self:SetPropagateKeyboardInput(false)
+        else
+            self:SetPropagateKeyboardInput(true)
+        end
+    end)
+
+    -- Title bar
+    local titleBar = StablemasterUI.CreateTitleBar(picker, "Select Dungeon")
+    picker.titleBar = titleBar
+
+    -- Search box
+    local searchLabel = StablemasterUI.CreateText(picker, STYLE.fontSizeNormal, STYLE.textDim)
+    searchLabel:SetPoint("TOPLEFT", picker, "TOPLEFT", STYLE.padding, -STYLE.headerHeight - STYLE.padding)
+    searchLabel:SetText("Search:")
+
+    local searchBox = StablemasterUI.CreateEditBox(picker, 200, 24)
+    searchBox:SetPoint("LEFT", searchLabel, "RIGHT", 10, 0)
+    searchBox:SetMaxLetters(50)
+
+    -- Instance list scroll frame
+    local instanceScroll = CreateFrame("ScrollFrame", nil, picker, "UIPanelScrollFrameTemplate")
+    instanceScroll:SetPoint("TOPLEFT", searchLabel, "BOTTOMLEFT", 0, -10)
+    instanceScroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -26, 45)
+
+    local instanceContent = CreateFrame("Frame", nil, instanceScroll)
+    instanceContent:SetSize(380, 1)
+    instanceScroll:SetScrollChild(instanceContent)
+
+    -- Add Instance button
+    local addBtn = StablemasterUI.CreateButton(picker, 100, STYLE.buttonHeight, "Add Dungeon")
+    addBtn:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -STYLE.padding, STYLE.padding)
+    addBtn:SetEnabled(false)
+
+    -- Cancel button
+    local cancelBtn = StablemasterUI.CreateButton(picker, 80, STYLE.buttonHeight, "Cancel")
+    cancelBtn:SetPoint("RIGHT", addBtn, "LEFT", -8, 0)
+    cancelBtn:SetScript("OnClick", function() picker:Hide() end)
+
+    -- Store state
+    picker.selectedInstance = nil
+    picker.instanceButtons = {}
+
+    -- Function to populate instance list
+    local function PopulateInstanceList(searchText)
+        -- Clear existing buttons
+        for _, btn in ipairs(picker.instanceButtons) do
+            btn:Hide()
+            btn:SetParent(nil)
+        end
+        picker.instanceButtons = {}
+
+        -- Store expanded state
+        picker.expandedTiers = picker.expandedTiers or {}
+
+        -- Get dungeon data from Encounter Journal
+        local tierData = {}
+        local numTiers = EJ_GetNumTiers()
+
+        for tierIndex = 1, numTiers do
+            EJ_SelectTier(tierIndex)
+            local tierName = EJ_GetTierInfo(tierIndex)
+
+            local dungeons = {}
+            local instanceIndex = 1
+            while true do
+                local instanceID, name, description, bgImage, buttonImage, loreImage, dungeonAreaMapID, link, shouldDisplayDifficulty, mapID = EJ_GetInstanceByIndex(instanceIndex, false)
+                if not instanceID then break end
+
+                table.insert(dungeons, {
+                    instanceID = instanceID,
+                    name = name,
+                    mapID = mapID
+                })
+                instanceIndex = instanceIndex + 1
+            end
+
+            if #dungeons > 0 then
+                table.insert(tierData, {
+                    tierIndex = tierIndex,
+                    name = tierName,
+                    dungeons = dungeons
+                })
+            end
+        end
+
+        -- Build display list based on search and expansion state
+        local displayItems = {}
+        searchText = searchText and string.lower(searchText) or ""
+
+        for _, tier in ipairs(tierData) do
+            local tierMatches = (searchText == "" or string.find(string.lower(tier.name), searchText))
+            local hasMatchingDungeons = false
+
+            -- Check if any dungeons match search
+            local matchingDungeons = {}
+            for _, dungeon in ipairs(tier.dungeons) do
+                if searchText == "" or string.find(string.lower(dungeon.name), searchText) then
+                    hasMatchingDungeons = true
+                    table.insert(matchingDungeons, dungeon)
+                end
+            end
+
+            -- Sort matching dungeons
+            table.sort(matchingDungeons, function(a, b) return a.name < b.name end)
+
+            -- Add tier if it matches or has matching dungeons
+            if tierMatches or hasMatchingDungeons then
+                table.insert(displayItems, {
+                    tierIndex = tier.tierIndex,
+                    name = tier.name,
+                    type = "Tier",
+                    level = 0,
+                    isExpanded = picker.expandedTiers[tier.tierIndex]
+                })
+
+                -- Add dungeons if tier is expanded or we're searching
+                if picker.expandedTiers[tier.tierIndex] or searchText ~= "" then
+                    for _, dungeon in ipairs(matchingDungeons) do
+                        table.insert(displayItems, {
+                            instanceID = dungeon.instanceID,
+                            name = dungeon.name,
+                            mapID = dungeon.mapID,
+                            type = "Dungeon",
+                            level = 1,
+                            tierIndex = tier.tierIndex
+                        })
+                    end
+                end
+            end
+        end
+
+        -- Create buttons for display items
+        for i, item in ipairs(displayItems) do
+            local btn = CreateFrame("Button", nil, instanceContent, "BackdropTemplate")
+            btn:SetSize(360, 25)
+            btn:SetPoint("TOPLEFT", instanceContent, "TOPLEFT", 0, -(i-1) * 27)
+            StablemasterUI.CreateBackdrop(btn, 0.6)
+
+            -- Indent based on level
+            local indent = item.level * 20
+
+            -- Expand/collapse icon for tiers
+            local expandIcon = nil
+            if item.type == "Tier" then
+                expandIcon = btn:CreateTexture(nil, "OVERLAY")
+                expandIcon:SetSize(12, 12)
+                expandIcon:SetPoint("LEFT", btn, "LEFT", indent + 4, 0)
+                if item.isExpanded then
+                    expandIcon:SetTexture("Interface\\Buttons\\UI-MinusButton-Up")
+                else
+                    expandIcon:SetTexture("Interface\\Buttons\\UI-PlusButton-Up")
+                end
+                btn.expandIcon = expandIcon
+                indent = indent + 16 -- Make room for the icon
+            end
+
+            local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            text:SetPoint("LEFT", btn, "LEFT", indent + 8, 0)
+            text:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
+            text:SetJustifyH("LEFT")
+
+            -- Different display for tiers vs dungeons
+            if item.type == "Tier" then
+                text:SetText(item.name)
+                text:SetTextColor(1, 1, 0.6, 1) -- Yellow for tiers
+            else
+                text:SetText(item.name)
+                text:SetTextColor(1, 1, 1, 1) -- White for dungeons
+            end
+
+            -- Store item data
+            btn.itemData = item
+
+            -- Click handler
+            if item.type == "Tier" then
+                btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                btn:SetScript("OnClick", function(self, mouseButton)
+                    -- Toggle expansion on any click for tiers
+                    picker.expandedTiers[item.tierIndex] = not picker.expandedTiers[item.tierIndex]
+                    PopulateInstanceList(searchBox:GetText())
+                end)
+            else
+                -- Dungeon selection
+                btn:SetScript("OnClick", function()
+                    -- Clear previous selection
+                    if picker.selectedButton then
+                        picker.selectedButton:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+                    end
+
+                    -- Select this dungeon
+                    picker.selectedInstance = item
+                    picker.selectedButton = btn
+                    btn:SetBackdropColor(0.2, 0.4, 0.2, 0.8) -- Green selection
+                    addBtn:SetEnabled(true)
+                end)
+            end
+
+            -- Hover effects
+            btn:SetScript("OnEnter", function(self)
+                if self ~= picker.selectedButton then
+                    if item.type == "Tier" then
+                        self:SetBackdropColor(0.15, 0.15, 0.2, 0.8)
+                    else
+                        self:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
+                    end
+                end
+
+                -- Show tooltip for tiers
+                if item.type == "Tier" then
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetText("Click to expand/collapse")
+                    GameTooltip:Show()
+                end
+            end)
+            btn:SetScript("OnLeave", function(self)
+                if self ~= picker.selectedButton then
+                    self:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+                end
+                GameTooltip:Hide()
+            end)
+
+            picker.instanceButtons[i] = btn
+        end
+
+        -- Update content height
+        local contentHeight = math.max(#displayItems * 27, 1)
+        instanceContent:SetHeight(contentHeight)
+
+        -- Manage scrollbar
+        if instanceScroll.ScrollBar then
+            if contentHeight > instanceScroll:GetHeight() then
+                instanceScroll.ScrollBar:Show()
+            else
+                instanceScroll.ScrollBar:Hide()
+                instanceScroll:SetVerticalScroll(0)
+            end
+        end
+    end
+
+    -- Search functionality
+    searchBox:SetScript("OnTextChanged", function(self)
+        PopulateInstanceList(self:GetText())
+    end)
+
+    -- Add button functionality
+    addBtn:SetScript("OnClick", function()
+        if picker.selectedInstance and parentDialog.targetPack then
+            EnsureConditions(parentDialog.targetPack)
+            table.insert(parentDialog.targetPack.conditions, {
+                type = "instance",
+                instanceID = picker.selectedInstance.instanceID,
+                instanceName = picker.selectedInstance.name,
+                mapID = picker.selectedInstance.mapID,
+            })
+
+            Stablemaster.VerbosePrint("Added instance rule: " .. picker.selectedInstance.name)
+
+            RebuildRulesList(parentDialog.rulesList, parentDialog.targetPack)
+            C_Timer.After(0.1, Stablemaster.SelectActivePack)
+            -- Refresh the pack panel to show updated rule count
+            if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                _G.StablemasterMainFrame.packPanel.refreshPacks()
+            end
+            picker:Hide()
+        end
+    end)
+
+    -- OnShow: populate list and reset selection
+    picker:SetScript("OnShow", function(self)
+        -- Move to end of UISpecialFrames so ESC closes this dialog first
+        for i, name in ipairs(UISpecialFrames) do
+            if name == "StablemasterInstancePicker" then
+                table.remove(UISpecialFrames, i)
+                break
+            end
+        end
+        table.insert(UISpecialFrames, "StablemasterInstancePicker")
+
+        self.selectedInstance = nil
+        self.selectedButton = nil
+        addBtn:SetEnabled(false)
+        searchBox:SetText("")
+        PopulateInstanceList("")
+    end)
+
+    picker:Hide()
+    table.insert(UISpecialFrames, "StablemasterInstancePicker")
     return picker
 end
 

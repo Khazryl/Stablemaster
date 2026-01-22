@@ -1,4 +1,4 @@
-Stablemaster.Debug("Core.lua loading.")
+Stablemaster.Debug("Core.lua loading...")
 
 Stablemaster.runtime = Stablemaster.runtime or {
     activePackName = nil,
@@ -6,7 +6,7 @@ Stablemaster.runtime = Stablemaster.runtime or {
 }
 
 -- Version - update this when you change the .toc version
-Stablemaster.version = "1.0.0"
+Stablemaster.version = "1.0.1"
 
 function Stablemaster.CreatePack(name, description)
     if not name or name == "" then
@@ -814,6 +814,64 @@ local function DoesRuleMatch(rule)
         end
         Stablemaster.Debug("Season rule: current season " .. tostring(currentSeason) .. " not in rule")
         return false, 0
+    elseif rule.type == "no_flying" then
+        -- No flying rule: matches when flying is NOT available
+        local priority = StablemasterDB.settings.rulePriorities and StablemasterDB.settings.rulePriorities.no_flying or 40
+
+        local canFly = IsFlyableArea()
+
+        if not canFly then
+            Stablemaster.Debug("No flying rule matched - flying not available")
+            return true, priority
+        end
+
+        Stablemaster.Debug("No flying rule: flying IS available here")
+        return false, 0
+    elseif rule.type == "in_party" then
+        -- In party rule: matches when in a party (but not a raid)
+        local priority = StablemasterDB.settings.rulePriorities and StablemasterDB.settings.rulePriorities.in_party or 30
+
+        local inParty = IsInGroup() and not IsInRaid()
+
+        if inParty then
+            Stablemaster.Debug("In party rule matched")
+            return true, priority
+        end
+
+        Stablemaster.Debug("In party rule: not in a party")
+        return false, 0
+    elseif rule.type == "in_raid" then
+        -- In raid rule: matches when in a raid group
+        local priority = StablemasterDB.settings.rulePriorities and StablemasterDB.settings.rulePriorities.in_raid or 30
+
+        local inRaid = IsInRaid()
+
+        if inRaid then
+            Stablemaster.Debug("In raid rule matched")
+            return true, priority
+        end
+
+        Stablemaster.Debug("In raid rule: not in a raid")
+        return false, 0
+    elseif rule.type == "instance" then
+        -- Instance rule: matches when in a specific dungeon/raid instance
+        local priority = StablemasterDB.settings.rulePriorities and StablemasterDB.settings.rulePriorities.instance or 55
+
+        if not rule.instanceName then
+            Stablemaster.Debug("Instance rule has no instanceName")
+            return false, 0
+        end
+
+        local currentInstanceName, instanceType = GetInstanceInfo()
+
+        -- Check if we're in an instance and the name matches
+        if instanceType ~= "none" and currentInstanceName == rule.instanceName then
+            Stablemaster.Debug("Instance rule matched: " .. rule.instanceName)
+            return true, priority
+        end
+
+        Stablemaster.Debug("Instance rule: not in instance " .. rule.instanceName .. " (current: " .. tostring(currentInstanceName) .. ")")
+        return false, 0
     end
 
     return false, 0
@@ -838,6 +896,9 @@ local function ScorePackAgainstContext(pack)
     local timeRules = {}
     local holidayRules = {}
     local seasonRules = {}
+    local noFlyingRules = {}
+    local groupRules = {}
+    local instanceRules = {}
 
     for i, rule in ipairs(pack.conditions) do
         Stablemaster.Debug("Pack '" .. pack.name .. "' rule " .. i .. ": type=" .. tostring(rule.type))
@@ -859,6 +920,12 @@ local function ScorePackAgainstContext(pack)
             table.insert(holidayRules, {rule = rule, index = i})
         elseif rule.type == "season" then
             table.insert(seasonRules, {rule = rule, index = i})
+        elseif rule.type == "no_flying" then
+            table.insert(noFlyingRules, {rule = rule, index = i})
+        elseif rule.type == "in_party" or rule.type == "in_raid" then
+            table.insert(groupRules, {rule = rule, index = i})
+        elseif rule.type == "instance" then
+            table.insert(instanceRules, {rule = rule, index = i})
         else
             Stablemaster.Debug("Unknown rule type: " .. tostring(rule.type))
         end
@@ -1057,6 +1124,75 @@ local function ScorePackAgainstContext(pack)
         -- If we have season rules but none matched, pack doesn't qualify
         if not seasonMatched then
             Stablemaster.Debug("Pack '" .. pack.name .. "': season rules exist but none matched, returning 0")
+            return 0, {}
+        end
+    end
+
+    -- No flying rules: OR logic (any no_flying rule match qualifies)
+    local noFlyingMatched = false
+    if #noFlyingRules > 0 then
+        for _, ruleData in ipairs(noFlyingRules) do
+            local matched, score = DoesRuleMatch(ruleData.rule)
+            if matched then
+                noFlyingMatched = true
+                totalScore = totalScore + score
+                table.insert(matchedRules, {
+                    type = ruleData.rule.type,
+                    score = score,
+                    index = ruleData.index
+                })
+            end
+        end
+
+        -- If we have no flying rules but none matched, pack doesn't qualify
+        if not noFlyingMatched then
+            Stablemaster.Debug("Pack '" .. pack.name .. "': no_flying rules exist but flying is available, returning 0")
+            return 0, {}
+        end
+    end
+
+    -- Group rules: OR logic (any group rule match qualifies)
+    local groupMatched = false
+    if #groupRules > 0 then
+        for _, ruleData in ipairs(groupRules) do
+            local matched, score = DoesRuleMatch(ruleData.rule)
+            if matched then
+                groupMatched = true
+                totalScore = totalScore + score
+                table.insert(matchedRules, {
+                    type = ruleData.rule.type,
+                    score = score,
+                    index = ruleData.index
+                })
+            end
+        end
+
+        -- If we have group rules but none matched, pack doesn't qualify
+        if not groupMatched then
+            Stablemaster.Debug("Pack '" .. pack.name .. "': group rules exist but not in matching group, returning 0")
+            return 0, {}
+        end
+    end
+
+    -- Instance rules: OR logic (any instance rule match qualifies)
+    local instanceMatched = false
+    if #instanceRules > 0 then
+        for _, ruleData in ipairs(instanceRules) do
+            local matched, score = DoesRuleMatch(ruleData.rule)
+            if matched then
+                instanceMatched = true
+                totalScore = totalScore + score
+                table.insert(matchedRules, {
+                    type = ruleData.rule.type,
+                    score = score,
+                    index = ruleData.index
+                })
+            end
+        end
+
+        -- If we have instance rules but none matched, pack doesn't qualify
+        if not instanceMatched then
+            Stablemaster.Debug("Pack '" .. pack.name .. "': instance rules exist but not in matching instance, returning 0")
             return 0, {}
         end
     end
@@ -1676,10 +1812,28 @@ local function SlashHandler(msg)
         Stablemaster.Print("- Debug mode: " .. (StablemasterDB.settings.debugMode and "ON" or "OFF"))
         Stablemaster.Print("- Flying preference: " .. (StablemasterDB.settings.preferFlyingMounts and "ON" or "OFF"))
         Stablemaster.Print("- Overlap mode: " .. (StablemasterDB.settings.packOverlapMode or "union"))
-        Stablemaster.Print("- Active pack: " .. (Stablemaster.runtime.activePackName or "None"))
+        -- Show all active packs
+        local activeNames = Stablemaster.runtime.activePackNames or {}
+        local activeList = {}
+        for name in pairs(activeNames) do
+            table.insert(activeList, name)
+        end
+        if #activeList > 0 then
+            Stablemaster.Print("- Active pack(s): " .. table.concat(activeList, ", "))
+        else
+            Stablemaster.Print("- Active pack(s): None")
+        end
         local fallbackPack = Stablemaster.GetFallbackPack()
         Stablemaster.Print("- Fallback pack: " .. (fallbackPack and fallbackPack.name or "None"))
         Stablemaster.Print("- Can fly here: " .. (CanFlyInCurrentZone() and "YES" or "NO"))
+        -- Show group status for party/raid rules
+        local groupStatus = "Solo"
+        if IsInRaid() then
+            groupStatus = "In Raid"
+        elseif IsInGroup() then
+            groupStatus = "In Party"
+        end
+        Stablemaster.Print("- Group status: " .. groupStatus)
 
     elseif command == "test" then
         local allMountIDs = C_MountJournal.GetMountIDs()
@@ -2131,6 +2285,9 @@ local function OnEvent(self, event, ...)
     elseif event == "PLAYER_EQUIPMENT_CHANGED" then
         -- Re-evaluate packs when equipment changes (outfit may have changed)
         C_Timer.After(0.5, Stablemaster.SelectActivePack)
+    elseif event == "GROUP_ROSTER_UPDATE" then
+        -- Re-evaluate packs when group composition changes (party/raid rules)
+        C_Timer.After(0.2, Stablemaster.SelectActivePack)
     end
 end
 
@@ -2141,6 +2298,7 @@ eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 eventFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
 eventFrame:RegisterEvent("NEW_WMO_CHUNK")
 eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 eventFrame:SetScript("OnEvent", OnEvent)
 
 -- Register slash commands

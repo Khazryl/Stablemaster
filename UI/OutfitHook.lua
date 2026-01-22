@@ -309,7 +309,8 @@ local function SetupMenuHook()
 
             -- Try mouseover frame as fallback
             if not outfitID then
-                local mouseFrame = GetMouseFocus()
+                local mouseFoci = GetMouseFoci and GetMouseFoci() or {}
+                local mouseFrame = mouseFoci[1]
                 if mouseFrame and mouseFrame.GetElementData then
                     local data = mouseFrame:GetElementData()
                     if data and data.outfitID then
@@ -329,7 +330,7 @@ local function SetupMenuHook()
                 -- If we have outfit data, add our items
                 if outfitID then
                     rootDescription:CreateDivider()
-                    rootDescription:CreateTitle("|cFF00FF96Stablemaster|r")
+                    rootDescription:CreateTitle("|cFF00FF96Add to Stablemaster pack|r")
 
                     local packs = GetPacksForDropdown(outfitID)
                     if #packs > 0 then

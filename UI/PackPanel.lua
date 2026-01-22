@@ -185,6 +185,13 @@ function StablemasterUI.CreatePackFrame(parent, pack)
             custom_transmog = STYLE.ruleTransmog,
             class = STYLE.ruleClass,
             race = STYLE.ruleRace,
+            time = STYLE.textDim,
+            holiday = STYLE.textDim,
+            season = STYLE.textDim,
+            no_flying = STYLE.ruleZone,
+            in_party = STYLE.textDim,
+            in_raid = STYLE.textDim,
+            instance = STYLE.ruleZone,
         }
         local ruleNames = {
             zone = "zone",
@@ -192,13 +199,30 @@ function StablemasterUI.CreatePackFrame(parent, pack)
             custom_transmog = "custom",
             class = "class",
             race = "race",
+            time = "time",
+            holiday = "holiday",
+            season = "season",
+            no_flying = "no-fly",
+            in_party = "Party",
+            in_raid = "Raid",
+            instance = "instance",
+        }
+        -- Rules that should show just the name without count
+        local noCountRules = {
+            no_flying = true,
+            in_party = true,
+            in_raid = true,
         }
 
         for ruleType, count in pairs(ruleTypeCounts) do
             local color = ruleColors[ruleType] or STYLE.text
             local typeName = ruleNames[ruleType] or ruleType
             local colorHex = string.format("|cff%02x%02x%02x", color[1]*255, color[2]*255, color[3]*255)
-            table.insert(ruleDetails, colorHex .. count .. " " .. typeName .. "|r")
+            if noCountRules[ruleType] then
+                table.insert(ruleDetails, colorHex .. typeName .. "|r")
+            else
+                table.insert(ruleDetails, colorHex .. count .. " " .. typeName .. "|r")
+            end
         end
 
         if #ruleDetails > 0 then

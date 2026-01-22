@@ -239,19 +239,23 @@ function StablemasterUI.CreateMainFrame()
         end
     end)
 
-    -- Hide menu when clicking elsewhere
+    -- Hide menu when clicking elsewhere (create hideFrame once)
+    local menuHideFrame = CreateFrame("Frame", "StablemasterMenuHideFrame", UIParent)
+    menuHideFrame:SetAllPoints(UIParent)
+    menuHideFrame:SetFrameStrata("FULLSCREEN")
+    menuHideFrame:EnableMouse(true)
+    menuHideFrame:Hide()
+    menuHideFrame:SetScript("OnMouseDown", function()
+        menu:Hide()
+        menuHideFrame:Hide()
+    end)
+
     menu:SetScript("OnShow", function(self)
-        local hideFrame = CreateFrame("Frame", nil, UIParent)
-        hideFrame:SetAllPoints(UIParent)
-        hideFrame:SetFrameStrata("FULLSCREEN")
-        hideFrame:EnableMouse(true)
-        hideFrame:SetScript("OnMouseDown", function()
-            self:Hide()
-            hideFrame:Hide()
-        end)
-        self:HookScript("OnHide", function()
-            if hideFrame then hideFrame:Hide() end
-        end)
+        menuHideFrame:Show()
+    end)
+
+    menu:SetScript("OnHide", function(self)
+        menuHideFrame:Hide()
     end)
 
     -- Search box functionality

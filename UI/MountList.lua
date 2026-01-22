@@ -519,18 +519,23 @@ function StablemasterUI.CreateMountContextMenu()
     menu.packButtons = {}
     menu.targetMount = nil
 
+    -- Hide menu when clicking elsewhere (create hideFrame once)
+    local menuHideFrame = CreateFrame("Frame", "StablemasterMountMenuHideFrame", UIParent)
+    menuHideFrame:SetAllPoints(UIParent)
+    menuHideFrame:SetFrameStrata("BACKGROUND")
+    menuHideFrame:EnableMouse(true)
+    menuHideFrame:Hide()
+    menuHideFrame:SetScript("OnMouseDown", function()
+        menu:Hide()
+        menuHideFrame:Hide()
+    end)
+
     menu:SetScript("OnShow", function(self)
-        local hideFrame = CreateFrame("Frame", nil, UIParent)
-        hideFrame:SetAllPoints(UIParent)
-        hideFrame:SetFrameStrata("BACKGROUND")
-        hideFrame:EnableMouse(true)
-        hideFrame:SetScript("OnMouseDown", function()
-            self:Hide()
-            hideFrame:Hide()
-        end)
-        self:HookScript("OnHide", function()
-            if hideFrame then hideFrame:Hide() end
-        end)
+        menuHideFrame:Show()
+    end)
+
+    menu:SetScript("OnHide", function(self)
+        menuHideFrame:Hide()
     end)
 
     menu:Hide()
