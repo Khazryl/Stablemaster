@@ -6,7 +6,7 @@ Stablemaster.runtime = Stablemaster.runtime or {
 }
 
 -- Version - update this when you change the .toc version
-Stablemaster.version = "1.0.1"
+Stablemaster.version = "1.1.1"
 
 function Stablemaster.CreatePack(name, description)
     if not name or name == "" then
