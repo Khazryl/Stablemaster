@@ -136,12 +136,27 @@ function StablemasterUI.CreateSettingsPanel(parent)
         StablemasterDB.settings.verboseMode = checked
     end
 
+    local minimapCheck = StablemasterUI.CreateCheckbox(settingsPanel, "Show minimap icon")
+    minimapCheck:SetPoint("LEFT", flyingCheck, "RIGHT", 40, 0)
+    minimapCheck:SetSize(150, 18)
+
+    minimapCheck.check.onClick = function(self, checked)
+        StablemasterDB.settings.showMinimapIcon = checked
+        if Stablemaster.MinimapIcon then
+            Stablemaster.MinimapIcon.SetVisible(checked)
+        end
+    end
+
     -- Initialize settings
     settingsPanel:SetScript("OnShow", function()
         local overlapMode = StablemasterDB.settings.packOverlapMode or "union"
         UpdateOverlapMode(overlapMode)
         flyingCheck.check:SetChecked(StablemasterDB.settings.preferFlyingMounts)
         verboseCheck.check:SetChecked(StablemasterDB.settings.verboseMode)
+        -- Default to true if not set
+        local showMinimap = StablemasterDB.settings.showMinimapIcon
+        if showMinimap == nil then showMinimap = true end
+        minimapCheck.check:SetChecked(showMinimap)
     end)
 
     return settingsPanel

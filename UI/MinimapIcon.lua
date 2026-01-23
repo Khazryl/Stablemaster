@@ -141,6 +141,13 @@ function MinimapIcon.Initialize()
         Stablemaster.Debug("Saved minimap icon position: angle " .. angle)
     end)
     
+    -- Respect the show/hide setting (default to shown)
+    local showMinimap = StablemasterDB.settings.showMinimapIcon
+    if showMinimap == nil then showMinimap = true end
+    if not showMinimap then
+        button:Hide()
+    end
+
     Stablemaster.Debug("Minimap icon initialized")
     return button
 end
@@ -165,6 +172,17 @@ function MinimapIcon.UpdateIcon()
     -- fallback icon
     btn.icon:SetTexture("Interface\\Icons\\Ability_Mount_RidingHorse")
     -- TODO: maybe cycle through different icons from the pack instead of just using the first one?
+end
+
+function MinimapIcon.SetVisible(visible)
+    local btn = _G["StablemasterMinimapButton"]
+    if not btn then return end
+
+    if visible then
+        btn:Show()
+    else
+        btn:Hide()
+    end
 end
 
 Stablemaster.MinimapIcon = MinimapIcon

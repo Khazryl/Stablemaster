@@ -6,7 +6,7 @@ Stablemaster.runtime = Stablemaster.runtime or {
 }
 
 -- Version - update this when you change the .toc version
-Stablemaster.version = "1.1.1"
+Stablemaster.version = "1.1.2"
 
 function Stablemaster.CreatePack(name, description)
     if not name or name == "" then
@@ -290,19 +290,40 @@ local function IsFlyingMount(mountID)
         Stablemaster.Debug("Mount " .. (name or "Unknown") .. " has mountTypeID: " .. tostring(mountTypeID))
     end
     
-    -- Mount type IDs for flying mounts (discovered through testing)
+    -- Mount type IDs for flying mounts
+    -- 230 = Ground only, 231 = Ground+Swim, 241 = AQ only, 254 = Swim only, 269 = Water strider
+    -- Flying types:
     local flyingTypeIDs = {
-        247, 248, 424, -- Initial guesses
-        402, -- Algarian Stormrider
-        -- We'll add more as we discover them from debug output
+        247,  -- Flying
+        248,  -- Flying + Swimming
+        284,  -- Dragonriding (base)
+        398,  -- Dragonriding variant
+        400,  -- Dragonriding variant
+        402,  -- Dragonriding variant (Algarian Stormrider, etc.)
+        407,  -- Dragonriding variant
+        408,  -- Dragonriding variant
+        411,  -- Dragonriding variant
+        424,  -- Dragonriding/Skyriding
+        436,  -- Newer flying mount type
+        437,  -- Newer flying mount type
     }
-    
+
     for _, flyingType in ipairs(flyingTypeIDs) do
         if mountTypeID == flyingType then
             return true
         end
     end
-    
+
+    -- If mount type is unknown/not in our list but > 280, it's likely a newer flying type
+    -- Most ground-only mounts are 230-231, flying starts at 247+
+    if mountTypeID >= 280 then
+        if StablemasterDB.settings.debugMode then
+            local name = C_MountJournal.GetMountInfoByID(mountID)
+            Stablemaster.Debug("Unknown mountTypeID " .. mountTypeID .. " for " .. (name or "Unknown") .. ", assuming flying (>= 280)")
+        end
+        return true
+    end
+
     return false
 end
 
