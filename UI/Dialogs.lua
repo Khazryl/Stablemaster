@@ -243,6 +243,97 @@ function StablemasterUI.CreateDuplicatePackDialog()
     return dialog
 end
 
+-- Rename Pack Dialog
+function StablemasterUI.CreateRenamePackDialog()
+    local dialog = CreateFrame("Frame", "StablemasterRenameDialog", UIParent, "BackdropTemplate")
+    dialog:SetSize(400, 150)
+    dialog:SetPoint("CENTER")
+    dialog:SetMovable(true)
+    dialog:EnableMouse(true)
+    dialog:SetFrameStrata("DIALOG")
+    StablemasterUI.CreateDialogBackdrop(dialog)
+
+    -- Title bar
+    local titleBar = StablemasterUI.CreateTitleBar(dialog, "Rename Pack")
+    dialog.titleBar = titleBar
+
+    local nameLabel = StablemasterUI.CreateText(dialog, STYLE.fontSizeNormal, STYLE.textDim)
+    nameLabel:SetPoint("TOPLEFT", dialog, "TOPLEFT", STYLE.padding, -STYLE.headerHeight - STYLE.padding)
+    nameLabel:SetText("New Pack Name:")
+
+    local nameInput = StablemasterUI.CreateEditBox(dialog, 250, 24)
+    nameInput:SetPoint("TOPLEFT", nameLabel, "BOTTOMLEFT", 0, -4)
+    nameInput:SetMaxLetters(30)
+
+    local renameButton = StablemasterUI.CreateButton(dialog, 80, STYLE.buttonHeight, "Rename")
+    renameButton:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -STYLE.padding, STYLE.padding)
+
+    local cancelButton = StablemasterUI.CreateButton(dialog, 80, STYLE.buttonHeight, "Cancel")
+    cancelButton:SetPoint("RIGHT", renameButton, "LEFT", -8, 0)
+
+    dialog.sourcePack = nil
+
+    renameButton:SetScript("OnClick", function()
+        local newName = Stablemaster.Trim(nameInput:GetText())
+
+        if newName == "" then
+            Stablemaster.Print("New pack name cannot be empty!")
+            return
+        end
+
+        if dialog.sourcePack then
+            local success, message = Stablemaster.RenamePack(dialog.sourcePack.name, newName)
+            Stablemaster.VerbosePrint(message)
+
+            if success then
+                dialog:Hide()
+                if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                    _G.StablemasterMainFrame.packPanel.refreshPacks()
+                end
+            else
+                Stablemaster.Print(message)
+            end
+        end
+    end)
+
+    cancelButton:SetScript("OnClick", function()
+        dialog:Hide()
+    end)
+
+    nameInput:SetScript("OnEnterPressed", function()
+        renameButton:GetScript("OnClick")(renameButton)
+    end)
+
+    dialog:SetScript("OnShow", function()
+        if dialog.sourcePack then
+            nameInput:SetText(dialog.sourcePack.name)
+            nameInput:SetFocus()
+            nameInput:HighlightText()
+        end
+    end)
+
+    dialog:Hide()
+    table.insert(UISpecialFrames, "StablemasterRenameDialog")
+    return dialog
+end
+
+function StablemasterUI.ShowRenameDialog(pack)
+    if not pack then return end
+
+    local dialog = _G.StablemasterRenameDialog or StablemasterUI.CreateRenamePackDialog()
+    dialog.sourcePack = pack
+    dialog.titleBar.title:SetText("Rename Pack: " .. pack.name)
+    -- Move to end of UISpecialFrames so ESC closes this dialog first
+    for i, name in ipairs(UISpecialFrames) do
+        if name == "StablemasterRenameDialog" then
+            table.remove(UISpecialFrames, i)
+            break
+        end
+    end
+    table.insert(UISpecialFrames, "StablemasterRenameDialog")
+    dialog:Show()
+end
+
 -- Export Pack Dialog
 function StablemasterUI.CreateExportDialog()
     local dialog = CreateFrame("Frame", "StablemasterExportDialog", UIParent, "BackdropTemplate")
@@ -493,7 +584,7 @@ function StablemasterUI.CreatePackContextMenu()
     end
 
     contextMenu = CreateFrame("Frame", "StablemasterPackContextMenu", UIParent, "BackdropTemplate")
-    contextMenu:SetSize(170, 148)
+    contextMenu:SetSize(170, 171)
     contextMenu:SetFrameStrata("FULLSCREEN_DIALOG")
     StablemasterUI.CreateBackdrop(contextMenu)
     contextMenu:Hide()
@@ -585,6 +676,14 @@ function StablemasterUI.CreatePackContextMenu()
         end
     end)
     table.insert(menuItems, duplicateItem)
+
+    -- Rename Pack
+    local renameItem = CreateMenuItem(contextMenu, "Rename Pack", function()
+        if contextMenu.pack then
+            StablemasterUI.ShowRenameDialog(contextMenu.pack)
+        end
+    end)
+    table.insert(menuItems, renameItem)
 
     -- Export Pack
     local exportItem = CreateMenuItem(contextMenu, "Export Pack", function()

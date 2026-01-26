@@ -202,7 +202,7 @@ function StablemasterUI.CreatePackFrame(parent, pack)
             time = "time",
             holiday = "holiday",
             season = "season",
-            no_flying = "no-fly",
+            no_flying = "Non-Flying Zones",
             in_party = "Party",
             in_raid = "Raid",
             instance = "instance",

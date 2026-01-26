@@ -52,7 +52,7 @@ function Stablemaster.DeletePack(name)
             return true, "Pack '" .. name .. "' deleted"
         end
     end
-    
+
     -- Then try shared packs
     if StablemasterDB.sharedPacks then
         for i, pack in ipairs(StablemasterDB.sharedPacks) do
@@ -63,8 +63,55 @@ function Stablemaster.DeletePack(name)
             end
         end
     end
-    
+
     return false, "Pack '" .. name .. "' not found"
+end
+
+function Stablemaster.RenamePack(oldName, newName)
+    if not oldName or oldName == "" then
+        return false, "Current pack name cannot be empty"
+    end
+
+    if not newName or newName == "" then
+        return false, "New pack name cannot be empty"
+    end
+
+    if oldName == newName then
+        return false, "New name is the same as the current name"
+    end
+
+    Stablemaster.Debug("RenamePack called - old: " .. oldName .. ", new: " .. newName)
+
+    -- Check if new name already exists
+    local existingPack = Stablemaster.GetPackByName(newName)
+    if existingPack then
+        local location = existingPack.isShared and "shared" or "character-specific"
+        return false, "Pack '" .. newName .. "' already exists (" .. location .. ")"
+    end
+
+    -- First try character-specific packs
+    local charPacks = Stablemaster.GetCharacterPacks()
+    for i, pack in ipairs(charPacks) do
+        if pack.name == oldName then
+            pack.name = newName
+            Stablemaster.SetCharacterPacks(charPacks)
+            Stablemaster.Debug("Renamed character-specific pack: " .. oldName .. " -> " .. newName)
+            return true, "Pack renamed to '" .. newName .. "'"
+        end
+    end
+
+    -- Then try shared packs
+    if StablemasterDB.sharedPacks then
+        for i, pack in ipairs(StablemasterDB.sharedPacks) do
+            if pack.name == oldName then
+                pack.name = newName
+                Stablemaster.Debug("Renamed shared pack: " .. oldName .. " -> " .. newName)
+                return true, "Shared pack renamed to '" .. newName .. "'"
+            end
+        end
+    end
+
+    return false, "Pack '" .. oldName .. "' not found"
 end
 
 function Stablemaster.DuplicatePack(sourceName, newName, newDescription)

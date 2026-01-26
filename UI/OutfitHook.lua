@@ -1,5 +1,9 @@
 local OutfitHook = {}
 
+-- Store outfit data locally to avoid tainted globals
+local stablemasterOutfitID = nil
+local stablemasterOutfitName = nil
+
 local function IsOutfitInPack(outfitID, packName)
     local pack = Stablemaster.GetPackByName(packName)
     if not pack or not pack.conditions then return false end
@@ -141,8 +145,10 @@ local function CreateContextMenu(self, level, menuList)
         end
 
     elseif menuList == "STABLEMASTER_OUTFIT_PACKS" then
-        outfitID = UIDROPDOWNMENU_INIT_MENU.outfitID
-        outfitName = UIDROPDOWNMENU_INIT_MENU.outfitName
+        -- Use our local variables to avoid accessing tainted global UIDROPDOWNMENU_INIT_MENU
+        outfitID = stablemasterOutfitID or (self and self.outfitID)
+        outfitName = stablemasterOutfitName or (self and self.outfitName)
+        if not outfitID then return end
 
         for _, pack in ipairs(GetPacksForDropdown(outfitID)) do
             local text, func, tip
@@ -177,12 +183,19 @@ end
 function OutfitHook.ShowContextMenu(outfitID, outfitName)
     if not outfitID then return end
 
-    CloseDropDownMenus()
-    local menu = CreateFrame("Frame", "StablemasterOutfitMenu", UIParent, "UIDropDownMenuTemplate")
-    menu.outfitID = outfitID
-    menu.outfitName = outfitName
-    UIDropDownMenu_Initialize(menu, CreateContextMenu, "MENU")
-    ToggleDropDownMenu(1, nil, menu, "cursor", 3, -3)
+    -- Store in local variables to avoid taint
+    stablemasterOutfitID = outfitID
+    stablemasterOutfitName = outfitName
+
+    -- Use C_Timer to break the taint chain
+    C_Timer.After(0, function()
+        CloseDropDownMenus()
+        local menu = CreateFrame("Frame", "StablemasterOutfitMenu", UIParent, "UIDropDownMenuTemplate")
+        menu.outfitID = stablemasterOutfitID
+        menu.outfitName = stablemasterOutfitName
+        UIDropDownMenu_Initialize(menu, CreateContextMenu, "MENU")
+        ToggleDropDownMenu(1, nil, menu, "cursor", 3, -3)
+    end)
 end
 
 function OutfitHook.ShowCurrentOutfitMenu()
@@ -289,92 +302,4 @@ function OutfitHook.DebugWardrobeUI()
     end
 end
 
--- Try to inject into WoW's outfit context menu
-local function SetupMenuHook()
-    -- Wrap MenuUtil.CreateContextMenu to inject our items into outfit menus
-    if MenuUtil and not MenuUtil.stablemasterWrapped then
-        local origCreateContextMenu = MenuUtil.CreateContextMenu
-        MenuUtil.CreateContextMenu = function(owner, generator, ...)
-            -- Try to get outfit data from the owner or mouseover frame
-            local outfitID, outfitName
-
-            -- Check if owner has GetElementData (outfit entry)
-            if owner and owner.GetElementData then
-                local data = owner:GetElementData()
-                if data and data.outfitID then
-                    outfitID = data.outfitID
-                    outfitName = data.name
-                end
-            end
-
-            -- Try mouseover frame as fallback
-            if not outfitID then
-                local mouseFoci = GetMouseFoci and GetMouseFoci() or {}
-                local mouseFrame = mouseFoci[1]
-                if mouseFrame and mouseFrame.GetElementData then
-                    local data = mouseFrame:GetElementData()
-                    if data and data.outfitID then
-                        outfitID = data.outfitID
-                        outfitName = data.name
-                    end
-                end
-            end
-
-            -- Wrap the generator to add our items
-            local wrappedGenerator = function(ownerInner, rootDescription)
-                -- Call original generator first
-                if generator then
-                    generator(ownerInner, rootDescription)
-                end
-
-                -- If we have outfit data, add our items
-                if outfitID then
-                    rootDescription:CreateDivider()
-                    rootDescription:CreateTitle("|cFF00FF96Add to Stablemaster pack|r")
-
-                    local packs = GetPacksForDropdown(outfitID)
-                    if #packs > 0 then
-                        for _, pack in ipairs(packs) do
-                            if pack.hasRule then
-                                rootDescription:CreateButton("|cFFFF4444X|r " .. pack.text, function()
-                                    RemoveOutfitRule(pack.name, outfitID, outfitName or ("Outfit " .. outfitID))
-                                end)
-                            else
-                                rootDescription:CreateButton(pack.text, function()
-                                    AddOutfitRule(pack.name, outfitID, outfitName or ("Outfit " .. outfitID))
-                                end)
-                            end
-                        end
-                    else
-                        rootDescription:CreateButton("|cFF808080No packs available|r", function() end)
-                    end
-                end
-            end
-
-            return origCreateContextMenu(owner, wrappedGenerator, ...)
-        end
-        MenuUtil.stablemasterWrapped = true
-    end
-
-    return true
-end
-
-local function Initialize()
-    -- Hook MenuUtil immediately if available
-    SetupMenuHook()
-
-    -- Also try on events in case MenuUtil isn't ready yet
-    local f = CreateFrame("Frame")
-    f:RegisterEvent("ADDON_LOADED")
-    f:RegisterEvent("PLAYER_ENTERING_WORLD")
-    f:SetScript("OnEvent", function(self, event, addon)
-        if event == "PLAYER_ENTERING_WORLD" then
-            C_Timer.After(1, SetupMenuHook)
-        elseif addon == "Blizzard_Collections" or addon == "Blizzard_Transmog" then
-            C_Timer.After(0.5, SetupMenuHook)
-        end
-    end)
-end
-
-Initialize()
 Stablemaster.OutfitHook = OutfitHook

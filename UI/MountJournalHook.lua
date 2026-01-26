@@ -130,7 +130,9 @@ local function CreateStablemasterContextMenu(self, level, menuList)
         end
         
     elseif menuList == "STABLEMASTER_PACKS" then
-        local mountID = UIDROPDOWNMENU_INIT_MENU.mountID
+        -- Use our local variable to avoid accessing tainted global UIDROPDOWNMENU_INIT_MENU
+        local mountID = stablemasterMenuMountID or (self and self.mountID)
+        if not mountID then return end
         local packs = GetPacksForDropdown(mountID)
         
         if #packs == 0 then
@@ -194,101 +196,61 @@ local function CreateStablemasterContextMenu(self, level, menuList)
     end
 end
 
-local originalMountJournalInitialize = nil
+-- Store mount ID for our custom menu (avoid tainting globals)
+local stablemasterMenuMountID = nil
 
 -- Initialize mount journal context menu hooks
 function MountJournalHook.Initialize()
     local function SetupHook()
-        if not MountJournal then
+        if not MountJournal_InitMountButton then
             return false
         end
-        
+
         Stablemaster.Debug("Setting up mount journal context menu hook")
-        
-        if MountJournal.mountOptionsMenu then
-            local menu = MountJournal.mountOptionsMenu
-            if menu.initialize then
-                originalMountJournalInitialize = menu.initialize
-                
-                menu.initialize = function(self, level, menuList)
-                    CreateStablemasterContextMenu(self, level, menuList)
-                end
-                
-                Stablemaster.Debug("Successfully hooked mount journal context menu")
-                return true
-            end
-        end
-        
-        if MountJournal and MountJournal.ListScrollFrame and MountJournal.ListScrollFrame.buttons then
-            for _, button in pairs(MountJournal.ListScrollFrame.buttons) do
-                if button and button.SetScript then
-                    local originalOnClick = button:GetScript("OnClick")
-                    button:SetScript("OnClick", function(self, mouseButton, down)
+
+        -- Use hooksecurefunc to avoid taint - this appends our code after Blizzard's
+        hooksecurefunc("MountJournal_InitMountButton", function(button, elementData)
+            if button and elementData and elementData.mountID then
+                -- Store mountID on the button for our use
+                button.stablemasterMountID = elementData.mountID
+
+                -- Only set up our handler once per button
+                if not button.stablemasterHooked then
+                    button.stablemasterHooked = true
+
+                    button:HookScript("OnClick", function(self, mouseButton, down)
                         if mouseButton == "RightButton" and not down then
-                            return
-                        else
-                            if originalOnClick then
-                                originalOnClick(self, mouseButton, down)
-                            end
-                        end
-                    end)
-                end
-            end
-        end
-        
-        if MountJournal_InitMountButton then
-            local originalInitButton = MountJournal_InitMountButton
-            MountJournal_InitMountButton = function(button, elementData)
-                originalInitButton(button, elementData)
-                
-                if button and elementData and elementData.mountID then
-                    button.mountID = elementData.mountID
-                    
-                    -- Store the original OnClick handler
-                    local originalOnClick = button:GetScript("OnClick")
-                    
-                    button:SetScript("OnClick", function(self, mouseButton, down)
-                        if mouseButton == "RightButton" and not down then
-                            local mountID = self.mountID
+                            local mountID = self.stablemasterMountID
                             if mountID then
-                                CloseDropDownMenus()
-                                
-                                local menu = CreateFrame("Frame", "StablemasterContextMenu" .. mountID, UIParent, "UIDropDownMenuTemplate")
-                                menu.mountID = mountID
-                                UIDropDownMenu_Initialize(menu, CreateStablemasterContextMenu, "MENU")
-                                
-                                ToggleDropDownMenu(1, nil, menu, "cursor", 3, -3)
-                                
-                                return
-                            end
-                        else
-                            -- For all other clicks (including left-click), use the original behavior
-                            if originalOnClick then
-                                originalOnClick(self, mouseButton, down)
+                                -- Store mount ID in our local variable (not a global)
+                                stablemasterMenuMountID = mountID
+
+                                -- Use C_Timer to break the taint chain
+                                C_Timer.After(0, function()
+                                    CloseDropDownMenus()
+
+                                    local menu = CreateFrame("Frame", "StablemasterMountMenu", UIParent, "UIDropDownMenuTemplate")
+                                    menu.mountID = stablemasterMenuMountID
+                                    UIDropDownMenu_Initialize(menu, CreateStablemasterContextMenu, "MENU")
+                                    ToggleDropDownMenu(1, nil, menu, "cursor", 3, -3)
+                                end)
                             end
                         end
                     end)
-                    
-                    if button.SetAttribute then
-                        button:SetAttribute("type", nil)
-                        button:SetAttribute("spell", nil)
-                    end
                 end
             end
-            
-            Stablemaster.Debug("Successfully hooked MountJournal_InitMountButton")
-            return true
-        end
-        
-        return false
+        end)
+
+        Stablemaster.Debug("Successfully hooked MountJournal_InitMountButton")
+        return true
     end
-    
+
     if not SetupHook() then
         local frame = CreateFrame("Frame")
         frame:RegisterEvent("ADDON_LOADED")
         frame:SetScript("OnEvent", function(self, event, addonName)
             if addonName == "Blizzard_Collections" then
-                C_Timer.After(1, function()
+                C_Timer.After(0.1, function()
                     if SetupHook() then
                         frame:UnregisterEvent("ADDON_LOADED")
                     end
