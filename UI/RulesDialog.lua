@@ -317,6 +317,9 @@ local function RebuildRulesList(container, pack)
         elseif rule.type == "no_flying" then
             -- No flying rule
             text:SetText("No Flying Zone")
+        elseif rule.type == "flying_zone" then
+            -- Flying zone rule
+            text:SetText("Flying Zone")
         elseif rule.type == "in_party" then
             -- In party rule
             text:SetText("In Party")
@@ -637,6 +640,31 @@ function StablemasterUI.ShowRulesDialog(pack)
                     })
 
                     Stablemaster.VerbosePrint("Added no flying rule.")
+                    RebuildRulesList(dlg.rulesList, dlg.targetPack)
+                    C_Timer.After(0.1, Stablemaster.SelectActivePack)
+                    if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                        _G.StablemasterMainFrame.packPanel.refreshPacks()
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+
+                info.text = "Flying Zone"
+                info.func = function()
+                    CloseDropDownMenus()
+                    if not dlg.targetPack then return end
+
+                    -- Check if rule already exists
+                    if HasRuleOfType(dlg.targetPack, "flying_zone") then
+                        Stablemaster.Print("This pack already has a Flying Zone rule.")
+                        return
+                    end
+
+                    EnsureConditions(dlg.targetPack)
+                    table.insert(dlg.targetPack.conditions, {
+                        type = "flying_zone",
+                    })
+
+                    Stablemaster.VerbosePrint("Added flying zone rule.")
                     RebuildRulesList(dlg.rulesList, dlg.targetPack)
                     C_Timer.After(0.1, Stablemaster.SelectActivePack)
                     if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then

@@ -11,6 +11,7 @@ Core.lua
 UI/UIStyle.lua
 UI/Dialogs.lua
 UI/MountList.lua
+UI/PetList.lua
 UI/MainFrame.lua
 UI/PackPanel.lua
 UI/RulesDialog.lua

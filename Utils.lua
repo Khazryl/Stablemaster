@@ -19,24 +19,49 @@ local function MigrateOldData()
     -- If we have old-style packs directly in StablemasterDB, migrate them
     if StablemasterDB.packs and type(StablemasterDB.packs) == "table" and #StablemasterDB.packs > 0 then
         Stablemaster.Debug("Migrating old pack data to character-specific format...")
-        
+
         -- Ensure characters table exists
         StablemasterDB.characters = StablemasterDB.characters or {}
-        
+
         -- Get current character key
         local charKey = UnitName("player") .. "-" .. GetRealmName()
-        
+
         -- Move old packs to current character
         StablemasterDB.characters[charKey] = {
             packs = StablemasterDB.packs,
             created = time(),
             migrated = true
         }
-        
+
         -- Remove old packs array
         StablemasterDB.packs = nil
-        
+
         Stablemaster.Debug("Migrated " .. #StablemasterDB.characters[charKey].packs .. " packs to character: " .. charKey)
+    end
+end
+
+-- Ensure all packs have the pets array (migration for pet support)
+local function EnsurePacksHavePets()
+    -- Check shared packs
+    if StablemasterDB.sharedPacks then
+        for _, pack in ipairs(StablemasterDB.sharedPacks) do
+            if not pack.pets then
+                pack.pets = {}
+            end
+        end
+    end
+
+    -- Check character packs
+    if StablemasterDB.characters then
+        for charKey, charData in pairs(StablemasterDB.characters) do
+            if charData.packs then
+                for _, pack in ipairs(charData.packs) do
+                    if not pack.pets then
+                        pack.pets = {}
+                    end
+                end
+            end
+        end
     end
 end
 
@@ -105,7 +130,10 @@ end
 local function InitializeCharacterData()
     -- Migrate old data first if needed
     MigrateOldData()
-    
+
+    -- Ensure all packs have pets array (for pet support)
+    EnsurePacksHavePets()
+
     local charKey = GetCharacterKey()
     if not StablemasterDB.characters[charKey] then
         StablemasterDB.characters[charKey] = {
@@ -465,6 +493,7 @@ function Stablemaster.ExportPack(packName)
         name = pack.name,
         description = pack.description or "",
         mounts = pack.mounts or {},
+        pets = pack.pets or {},
         conditions = conditions,
     }
 
@@ -537,6 +566,7 @@ function Stablemaster.ImportPack(importString, isShared)
         name = finalName,
         description = packData.description or "",
         mounts = packData.mounts or {},
+        pets = packData.pets or {},
         conditions = packData.conditions or {},
         isShared = isShared,
         isFallback = false,
@@ -553,6 +583,18 @@ function Stablemaster.ImportPack(importString, isShared)
         end
     end
     newPack.mounts = validMounts
+
+    -- Validate pets exist (optional - just filter out invalid ones)
+    local validPets = {}
+    for _, petGUID in ipairs(newPack.pets) do
+        if type(petGUID) == "string" then
+            local speciesID = C_PetJournal.GetPetInfoByPetID(petGUID)
+            if speciesID then
+                table.insert(validPets, petGUID)
+            end
+        end
+    end
+    newPack.pets = validPets
 
     -- Add to appropriate pack list
     if isShared then

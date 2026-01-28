@@ -4,8 +4,12 @@ Stablemaster.Debug("UI/MainFrame.lua loading...")
 local STYLE = StablemasterUI.Style
 local mainFrame = nil
 
+-- Track active tab ("mounts" or "pets")
+local activeTab = "mounts"
+
 -- Create a modern filter menu
 local filterMenu = nil
+local petFilterMenu = nil
 
 local function CreateFilterMenu(parent, currentFilters, onFilterChange)
     if filterMenu then
@@ -79,6 +83,48 @@ local function CreateFilterMenu(parent, currentFilters, onFilterChange)
     end
 
     filterMenu = menu
+    return menu
+end
+
+local function CreatePetFilterMenu(parent, currentFilters, onFilterChange)
+    if petFilterMenu then
+        return petFilterMenu
+    end
+
+    local menu = CreateFrame("Frame", "StablemasterPetFilterMenu", UIParent, "BackdropTemplate")
+    menu:SetSize(175, 70)
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    StablemasterUI.CreateBackdrop(menu)
+    menu:Hide()
+
+    local yOffset = -STYLE.padding
+
+    -- Favorites only checkbox
+    local favoritesCheck = StablemasterUI.CreateCheckbox(menu, "Favorites only")
+    favoritesCheck:SetPoint("TOPLEFT", menu, "TOPLEFT", STYLE.padding, yOffset)
+    favoritesCheck.check.onClick = function(self, checked)
+        currentFilters.favoritesOnly = checked
+        onFilterChange()
+    end
+    menu.favoritesCheck = favoritesCheck
+    yOffset = yOffset - 22
+
+    -- Can battle checkbox
+    local canBattleCheck = StablemasterUI.CreateCheckbox(menu, "Battle pets only")
+    canBattleCheck:SetPoint("TOPLEFT", menu, "TOPLEFT", STYLE.padding, yOffset)
+    canBattleCheck.check.onClick = function(self, checked)
+        currentFilters.canBattleOnly = checked
+        onFilterChange()
+    end
+    menu.canBattleCheck = canBattleCheck
+
+    -- Update function to sync checkboxes with current filter state
+    menu.UpdateCheckboxes = function(self)
+        self.favoritesCheck.check:SetChecked(currentFilters.favoritesOnly or false)
+        self.canBattleCheck.check:SetChecked(currentFilters.canBattleOnly or false)
+    end
+
+    petFilterMenu = menu
     return menu
 end
 
@@ -192,85 +238,220 @@ function StablemasterUI.CreateMainFrame()
     -- Macro instructions in bottom right (inside the backdrop)
     local macroInstructions = StablemasterUI.CreateText(frame, STYLE.fontSizeSmall, STYLE.textDim)
     macroInstructions:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -STYLE.padding, STYLE.padding + 2)
-    macroInstructions:SetText("Create a macro with |cff66cc99/stablemaster mount|r for your action bar")
+    macroInstructions:SetText("Macros: |cff66cc99/sm mount|r and |cff66cc99/sm pet|r")
 
-    -- Left panel (mounts)
+    -- Left panel (mounts and pets with tabs)
     local mountPanel = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     mountPanel:SetPoint("TOPLEFT", frame, "TOPLEFT", STYLE.padding, -STYLE.headerHeight - STYLE.padding)
     mountPanel:SetPoint("BOTTOMLEFT", settingsPanel, "TOPLEFT", 0, STYLE.padding)
     mountPanel:SetWidth(380)
     StablemasterUI.CreateBackdrop(mountPanel, 0.6)
 
-    -- Mount panel header
-    local mountTitle = StablemasterUI.CreateHeaderText(mountPanel, "Your Mounts")
-    mountTitle:SetPoint("TOP", mountPanel, "TOP", 0, -STYLE.padding)
+    -- Tab buttons container
+    local tabContainer = CreateFrame("Frame", nil, mountPanel)
+    tabContainer:SetPoint("TOPLEFT", mountPanel, "TOPLEFT", STYLE.padding, -STYLE.padding)
+    tabContainer:SetPoint("TOPRIGHT", mountPanel, "TOPRIGHT", -STYLE.padding, -STYLE.padding)
+    tabContainer:SetHeight(24)
 
-    -- Mount counter
-    local mountCounter = StablemasterUI.CreateText(mountPanel, STYLE.fontSizeNormal, STYLE.accent)
-    mountCounter:SetPoint("TOP", mountTitle, "BOTTOM", 0, -4)
-    mountCounter:SetText("Loading...")
-    mountPanel.mountCounter = mountCounter
+    -- Create tab buttons
+    local mountsTab = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
+    mountsTab:SetSize(100, 24)
+    mountsTab:SetPoint("LEFT", tabContainer, "LEFT", 0, 0)
+    StablemasterUI.CreateBackdrop(mountsTab, 0.8)
 
-    -- Search box
+    local mountsTabText = mountsTab:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    mountsTabText:SetPoint("CENTER", mountsTab, "CENTER", 0, 0)
+    mountsTabText:SetText("Mounts")
+    mountsTab.text = mountsTabText
+
+    local petsTab = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
+    petsTab:SetSize(100, 24)
+    petsTab:SetPoint("LEFT", mountsTab, "RIGHT", 4, 0)
+    StablemasterUI.CreateBackdrop(petsTab, 0.8)
+
+    local petsTabText = petsTab:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    petsTabText:SetPoint("CENTER", petsTab, "CENTER", 0, 0)
+    petsTabText:SetText("Pets")
+    petsTab.text = petsTabText
+
+    -- Counter (shared, updates based on active tab)
+    local itemCounter = StablemasterUI.CreateText(mountPanel, STYLE.fontSizeNormal, STYLE.accent)
+    itemCounter:SetPoint("TOP", tabContainer, "BOTTOM", 0, -4)
+    itemCounter:SetText("Loading...")
+    mountPanel.mountCounter = itemCounter  -- Keep this name for mount list compatibility
+    mountPanel.petCounter = itemCounter    -- Also reference for pet list
+
+    -- Search box (shared)
     local searchBox = StablemasterUI.CreateEditBox(mountPanel, 180, 22)
-    searchBox:SetPoint("TOPLEFT", mountPanel, "TOPLEFT", STYLE.padding, -50)
+    searchBox:SetPoint("TOPLEFT", mountPanel, "TOPLEFT", STYLE.padding, -58)
     searchBox:SetText("Search...")
     searchBox:SetTextColor(unpack(STYLE.textDim))
 
-    -- Initialize filter state
-    local currentFilters = {
+    -- Filter button (shared, but behavior changes based on tab)
+    local filterButton = StablemasterUI.CreateButton(mountPanel, 80, STYLE.buttonHeight, "Filters")
+    filterButton:SetPoint("TOPRIGHT", mountPanel, "TOPRIGHT", -STYLE.padding, -58)
+
+    -- Initialize mount filter state
+    local mountFilters = {
         showUnowned = false,
         hideUnusable = true,
         flyingOnly = false,
-        sourceFilter = "all"
+        sourceFilter = "all",
+        searchText = ""
     }
 
+    -- Initialize pet filter state
+    local petFilters = {
+        favoritesOnly = false,
+        canBattleOnly = false,
+        searchText = ""
+    }
+
+    -- Create mount list (initially visible)
     local mountList = StablemasterUI.CreateMountList(mountPanel)
     mountPanel.mountList = mountList
-    mountPanel.currentFilters = currentFilters
+    mountPanel.currentFilters = mountFilters
+
+    -- Create pet list (initially hidden)
+    local petList = StablemasterUI.CreatePetList(mountPanel)
+    petList:Hide()
+    mountPanel.petList = petList
+    mountPanel.petFilters = petFilters
 
     -- Store references for backward compatibility
-    mountPanel.filterCheck = {GetChecked = function() return currentFilters.showUnowned end}
-    mountPanel.hideUnusableCheck = {GetChecked = function() return currentFilters.hideUnusable end}
-    mountPanel.flyingOnlyCheck = {GetChecked = function() return currentFilters.flyingOnly end}
+    mountPanel.filterCheck = {GetChecked = function() return mountFilters.showUnowned end}
+    mountPanel.hideUnusableCheck = {GetChecked = function() return mountFilters.hideUnusable end}
+    mountPanel.flyingOnlyCheck = {GetChecked = function() return mountFilters.flyingOnly end}
 
-    -- Filter button (modern style)
-    local filterButton = StablemasterUI.CreateButton(mountPanel, 80, STYLE.buttonHeight, "Filters")
-    filterButton:SetPoint("TOPRIGHT", mountPanel, "TOPRIGHT", -STYLE.padding, -50)
-
-    -- Create filter menu
-    local menu = CreateFilterMenu(mountPanel, currentFilters, function()
-        StablemasterUI.UpdateMountList(mountList, currentFilters)
+    -- Create mount filter menu
+    local mountMenu = CreateFilterMenu(mountPanel, mountFilters, function()
+        StablemasterUI.UpdateMountList(mountList, mountFilters)
     end)
 
-    filterButton:SetScript("OnClick", function(self)
-        if menu:IsShown() then
-            menu:Hide()
+    -- Create pet filter menu
+    local petMenu = CreatePetFilterMenu(mountPanel, petFilters, function()
+        StablemasterUI.UpdatePetList(petList, petFilters)
+    end)
+
+    -- Function to update tab appearance
+    local function UpdateTabAppearance()
+        if activeTab == "mounts" then
+            mountsTab:SetBackdropColor(STYLE.accent[1] * 0.3, STYLE.accent[2] * 0.3, STYLE.accent[3] * 0.3, 0.9)
+            mountsTab:SetBackdropBorderColor(unpack(STYLE.accent))
+            mountsTabText:SetTextColor(1, 1, 1, 1)
+
+            petsTab:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+            petsTab:SetBackdropBorderColor(unpack(STYLE.borderColor))
+            petsTabText:SetTextColor(0.6, 0.6, 0.6, 1)
         else
-            menu:UpdateCheckboxes()
-            menu:ClearAllPoints()
-            menu:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT", 0, -2)
-            menu:Show()
+            petsTab:SetBackdropColor(STYLE.accent[1] * 0.3, STYLE.accent[2] * 0.3, STYLE.accent[3] * 0.3, 0.9)
+            petsTab:SetBackdropBorderColor(unpack(STYLE.accent))
+            petsTabText:SetTextColor(1, 1, 1, 1)
+
+            mountsTab:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+            mountsTab:SetBackdropBorderColor(unpack(STYLE.borderColor))
+            mountsTabText:SetTextColor(0.6, 0.6, 0.6, 1)
+        end
+    end
+
+    -- Function to switch tabs
+    local function SwitchToTab(tabName)
+        activeTab = tabName
+        UpdateTabAppearance()
+
+        -- Hide any open menus
+        mountMenu:Hide()
+        petMenu:Hide()
+
+        if tabName == "mounts" then
+            mountList:Show()
+            petList:Hide()
+            -- Update search text
+            if searchBox:GetText() ~= "Search..." then
+                mountFilters.searchText = searchBox:GetText()
+            end
+            StablemasterUI.UpdateMountList(mountList, mountFilters)
+        else
+            mountList:Hide()
+            petList:Show()
+            -- Update search text
+            if searchBox:GetText() ~= "Search..." then
+                petFilters.searchText = searchBox:GetText()
+            end
+            StablemasterUI.UpdatePetList(petList, petFilters)
+        end
+    end
+
+    -- Tab click handlers
+    mountsTab:SetScript("OnClick", function() SwitchToTab("mounts") end)
+    petsTab:SetScript("OnClick", function() SwitchToTab("pets") end)
+
+    -- Tab hover effects
+    mountsTab:SetScript("OnEnter", function(self)
+        if activeTab ~= "mounts" then
+            self:SetBackdropColor(STYLE.accent[1] * 0.15, STYLE.accent[2] * 0.15, STYLE.accent[3] * 0.15, 0.8)
+        end
+    end)
+    mountsTab:SetScript("OnLeave", function(self)
+        UpdateTabAppearance()
+    end)
+    petsTab:SetScript("OnEnter", function(self)
+        if activeTab ~= "pets" then
+            self:SetBackdropColor(STYLE.accent[1] * 0.15, STYLE.accent[2] * 0.15, STYLE.accent[3] * 0.15, 0.8)
+        end
+    end)
+    petsTab:SetScript("OnLeave", function(self)
+        UpdateTabAppearance()
+    end)
+
+    -- Initialize tab appearance
+    UpdateTabAppearance()
+
+    -- Filter button click handler (shows appropriate menu based on active tab)
+    filterButton:SetScript("OnClick", function(self)
+        local currentMenu = activeTab == "mounts" and mountMenu or petMenu
+        local otherMenu = activeTab == "mounts" and petMenu or mountMenu
+
+        -- Hide the other menu
+        otherMenu:Hide()
+
+        if currentMenu:IsShown() then
+            currentMenu:Hide()
+        else
+            currentMenu:UpdateCheckboxes()
+            currentMenu:ClearAllPoints()
+            currentMenu:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT", 0, -2)
+            currentMenu:Show()
         end
     end)
 
-    -- Hide menu when clicking elsewhere (create hideFrame once)
+    -- Hide menu when clicking elsewhere
     local menuHideFrame = CreateFrame("Frame", "StablemasterMenuHideFrame", UIParent)
     menuHideFrame:SetAllPoints(UIParent)
     menuHideFrame:SetFrameStrata("FULLSCREEN")
     menuHideFrame:EnableMouse(true)
     menuHideFrame:Hide()
     menuHideFrame:SetScript("OnMouseDown", function()
-        menu:Hide()
+        mountMenu:Hide()
+        petMenu:Hide()
         menuHideFrame:Hide()
     end)
 
-    menu:SetScript("OnShow", function(self)
+    mountMenu:SetScript("OnShow", function(self)
         menuHideFrame:Show()
     end)
-
-    menu:SetScript("OnHide", function(self)
-        menuHideFrame:Hide()
+    mountMenu:SetScript("OnHide", function(self)
+        if not petMenu:IsShown() then
+            menuHideFrame:Hide()
+        end
+    end)
+    petMenu:SetScript("OnShow", function(self)
+        menuHideFrame:Show()
+    end)
+    petMenu:SetScript("OnHide", function(self)
+        if not mountMenu:IsShown() then
+            menuHideFrame:Hide()
+        end
     end)
 
     -- Search box functionality
@@ -288,11 +469,20 @@ function StablemasterUI.CreateMainFrame()
     end)
 
     searchBox:SetScript("OnTextChanged", function(self)
-        if self:GetText() ~= "Search..." then
-            currentFilters.searchText = self:GetText()
-            StablemasterUI.UpdateMountList(mountList, currentFilters)
+        local text = self:GetText()
+        if text ~= "Search..." then
+            if activeTab == "mounts" then
+                mountFilters.searchText = text
+                StablemasterUI.UpdateMountList(mountList, mountFilters)
+            else
+                petFilters.searchText = text
+                StablemasterUI.UpdatePetList(petList, petFilters)
+            end
         end
     end)
+
+    -- Store tab switching function for external use
+    mountPanel.switchToTab = SwitchToTab
 
     -- Right panel (packs)
     local packPanel = CreateFrame("Frame", nil, frame, "BackdropTemplate")
@@ -319,16 +509,29 @@ function StablemasterUI.ToggleMainFrame()
         frame:Hide()
     else
         frame:Show()
+        -- Reset active tab to mounts
+        activeTab = "mounts"
+
         -- Initialize with current filters and update counter
-        local currentFilters = frame.mountPanel.currentFilters
-        currentFilters.searchText = ""
-        StablemasterUI.UpdateMountList(frame.mountPanel.mountList, currentFilters)
+        local mountFilters = frame.mountPanel.currentFilters
+        mountFilters.searchText = ""
+        StablemasterUI.UpdateMountList(frame.mountPanel.mountList, mountFilters)
+
+        -- Also initialize pet filters (but don't show pet list yet)
+        local petFilters = frame.mountPanel.petFilters
+        petFilters.searchText = ""
+
         frame.packPanel.refreshPacks()
+
+        -- Switch to mounts tab to ensure proper initialization
+        if frame.mountPanel.switchToTab then
+            frame.mountPanel.switchToTab("mounts")
+        end
 
         -- Force counter update on first load
         C_Timer.After(0.1, function()
             if frame.mountPanel.mountCounter then
-                StablemasterUI.UpdateMountList(frame.mountPanel.mountList, currentFilters)
+                StablemasterUI.UpdateMountList(frame.mountPanel.mountList, mountFilters)
             end
         end)
     end
