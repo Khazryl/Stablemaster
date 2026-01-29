@@ -74,7 +74,32 @@ function StablemasterUI.CreateMountList(parent)
 
     scrollFrame.content = content
     scrollFrame.buttons = {}
+    scrollFrame.selectedMounts = {}  -- Track multi-selected mounts by mountID
     return scrollFrame
+end
+
+-- Helper to update mount button visual state based on selection
+local function UpdateMountButtonSelectionVisual(button, isSelected)
+    if isSelected then
+        button:SetBackdropColor(0.2, 0.5, 0.2, 0.8)  -- Green for selected
+        button:SetBackdropBorderColor(0.3, 0.8, 0.3, 1)
+    else
+        button:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+        button:SetBackdropBorderColor(unpack(STYLE.borderColor))
+    end
+end
+
+-- Helper to clear all mount selections
+function StablemasterUI.ClearMountSelections(scrollFrame)
+    if scrollFrame and scrollFrame.selectedMounts then
+        wipe(scrollFrame.selectedMounts)
+        -- Update visuals for all buttons
+        for _, btn in ipairs(scrollFrame.buttons) do
+            if btn.mountData then
+                UpdateMountButtonSelectionVisual(btn, false)
+            end
+        end
+    end
 end
 
 function StablemasterUI.CreateMountButton(parent, index)
@@ -98,36 +123,82 @@ function StablemasterUI.CreateMountButton(parent, index)
     button.name = name
 
     button:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(STYLE.accent[1] * 0.15, STYLE.accent[2] * 0.15, STYLE.accent[3] * 0.15, 0.8)
-        self:SetBackdropBorderColor(unpack(STYLE.accent))
-        
+        -- Check if this mount is selected
+        local isSelected = self.scrollFrame and self.scrollFrame.selectedMounts and
+                          self.mountData and self.scrollFrame.selectedMounts[self.mountData.id]
+        if isSelected then
+            self:SetBackdropColor(0.25, 0.6, 0.25, 0.9)  -- Brighter green on hover when selected
+            self:SetBackdropBorderColor(0.4, 0.9, 0.4, 1)
+        else
+            self:SetBackdropColor(STYLE.accent[1] * 0.15, STYLE.accent[2] * 0.15, STYLE.accent[3] * 0.15, 0.8)
+            self:SetBackdropBorderColor(unpack(STYLE.accent))
+        end
+
         if self.mountData then
             -- Show enhanced tooltip with 3D model
             StablemasterUI.ShowMountTooltipWithModel(self, self.mountData)
         end
     end)
     button:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
-        self:SetBackdropBorderColor(unpack(STYLE.borderColor))
+        -- Check if this mount is selected
+        local isSelected = self.scrollFrame and self.scrollFrame.selectedMounts and
+                          self.mountData and self.scrollFrame.selectedMounts[self.mountData.id]
+        if isSelected then
+            self:SetBackdropColor(0.2, 0.5, 0.2, 0.8)  -- Green for selected
+            self:SetBackdropBorderColor(0.3, 0.8, 0.3, 1)
+        else
+            self:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+            self:SetBackdropBorderColor(unpack(STYLE.borderColor))
+        end
         StablemasterUI.HideMountTooltip()
     end)
 
     button:SetScript("OnDragStart", function(self)
         if self.mountData and self.mountData.isCollected then
+            -- Build list of mounts to drag (selected ones + current if not selected)
+            local mountsToDrag = {}
+            local hasSelections = self.scrollFrame and self.scrollFrame.selectedMounts and next(self.scrollFrame.selectedMounts)
+
+            if hasSelections then
+                -- If there are selections, use them (include current mount if not already selected)
+                for mountID, mountData in pairs(self.scrollFrame.selectedMounts) do
+                    table.insert(mountsToDrag, mountData)
+                end
+                -- If current mount isn't in selection, add it
+                if not self.scrollFrame.selectedMounts[self.mountData.id] then
+                    table.insert(mountsToDrag, self.mountData)
+                end
+            else
+                -- No selections, just drag the current mount
+                table.insert(mountsToDrag, self.mountData)
+            end
+
+            self.mountsToDrag = mountsToDrag
+
             local dragFrame = CreateFrame("Frame", nil, UIParent)
-            dragFrame:SetSize(200, 30)
             dragFrame:SetFrameStrata("TOOLTIP")
             dragFrame:SetAlpha(0.8)
 
-            local dragIcon = dragFrame:CreateTexture(nil, "ARTWORK")
-            dragIcon:SetSize(24, 24)
-            dragIcon:SetPoint("LEFT", dragFrame, "LEFT", 0, 0)
-            dragIcon:SetTexture(self.mountData.icon)
+            if #mountsToDrag == 1 then
+                -- Single mount drag display
+                dragFrame:SetSize(200, 30)
+                local dragIcon = dragFrame:CreateTexture(nil, "ARTWORK")
+                dragIcon:SetSize(24, 24)
+                dragIcon:SetPoint("LEFT", dragFrame, "LEFT", 0, 0)
+                dragIcon:SetTexture(mountsToDrag[1].icon)
 
-            local dragText = dragFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            dragText:SetPoint("LEFT", dragIcon, "RIGHT", 4, 0)
-            dragText:SetText(self.mountData.name)
-            dragText:SetTextColor(1, 1, 1, 1)
+                local dragText = dragFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                dragText:SetPoint("LEFT", dragIcon, "RIGHT", 4, 0)
+                dragText:SetText(mountsToDrag[1].name)
+                dragText:SetTextColor(1, 1, 1, 1)
+            else
+                -- Multi-mount drag display
+                dragFrame:SetSize(200, 30)
+                local dragText = dragFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                dragText:SetPoint("CENTER", dragFrame, "CENTER", 0, 0)
+                dragText:SetText("|cff00ff00" .. #mountsToDrag .. " mounts|r")
+                dragText:SetTextColor(1, 1, 1, 1)
+            end
 
             dragFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", GetCursorPosition() / UIParent:GetEffectiveScale())
 
@@ -138,6 +209,7 @@ function StablemasterUI.CreateMountButton(parent, index)
                 if self.isDragging then
                     local x, y = GetCursorPosition()
                     local scale = UIParent:GetEffectiveScale()
+                    dragFrame:ClearAllPoints()
                     dragFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
                     C_Timer.After(0.01, UpdateDragPosition)
                 end
@@ -155,40 +227,86 @@ function StablemasterUI.CreateMountButton(parent, index)
             end
             local packFrame = StablemasterUI.GetPackFrameUnderCursor()
             if packFrame and packFrame.pack then
-                local success, message = Stablemaster.AddMountToPack(packFrame.pack.name, self.mountData.id)
-                Stablemaster.VerbosePrint(message)
-                if success then
-                    if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                local pack = packFrame.pack
+                local isExpandedView = packFrame.isExpanded == true
+                local mountsToDrag = self.mountsToDrag or {self.mountData}
+                local successCount = 0
+                local addedNames = {}
+
+                for _, mountData in ipairs(mountsToDrag) do
+                    local success, message = Stablemaster.AddMountToPack(pack.name, mountData.id)
+                    if success then
+                        successCount = successCount + 1
+                        table.insert(addedNames, mountData.name)
+                    end
+                end
+
+                if successCount > 0 then
+                    if successCount == 1 then
+                        Stablemaster.VerbosePrint("Added " .. addedNames[1] .. " to pack " .. pack.name)
+                    else
+                        Stablemaster.VerbosePrint("Added " .. successCount .. " mounts to pack " .. pack.name)
+                    end
+
+                    -- Clear selections after successful drop
+                    if self.scrollFrame then
+                        StablemasterUI.ClearMountSelections(self.scrollFrame)
+                    end
+
+                    if isExpandedView then
+                        -- Refresh the expanded view by re-toggling it (close and reopen)
+                        StablemasterUI.TogglePackExpansion(packFrame, pack)
+                        StablemasterUI.TogglePackExpansion(packFrame, pack)
+                    elseif _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
                         _G.StablemasterMainFrame.packPanel.refreshPacks()
                     end
                 end
             end
+            self.mountsToDrag = nil
         end
     end)
 
     button:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "LeftButton" then
-            if self.mountData then
-                Stablemaster.Debug("Left-clicked: " .. self.mountData.name)
-                -- Debug mount data for filtering issues
-                if StablemasterDB and StablemasterDB.settings and StablemasterDB.settings.debugMode then
-                    local m = self.mountData
-                    Stablemaster.Debug("  Mount ID: " .. (m.id or "nil"))
-                    Stablemaster.Debug("  isUsable: " .. tostring(m.isUsable))
-                    Stablemaster.Debug("  isCollected: " .. tostring(m.isCollected))
-                    Stablemaster.Debug("  isFactionSpecific: " .. tostring(m.isFactionSpecific))
-                    Stablemaster.Debug("  faction: " .. tostring(m.faction))
-                    Stablemaster.Debug("  sourceType: " .. tostring(m.sourceType))
-                    
-                    -- Check what the game APIs return directly
-                    local name, spellID, icon, active, isUsable, sourceType, isFavorite, isFactionSpecific, faction, shouldHideOnChar, isCollected =
-                        C_MountJournal.GetMountInfoByID(m.id)
-                    Stablemaster.Debug("  API isUsable: " .. tostring(isUsable))
-                    Stablemaster.Debug("  API isFactionSpecific: " .. tostring(isFactionSpecific))
-                    Stablemaster.Debug("  API faction: " .. tostring(faction))
-                    
-                    local playerFaction = UnitFactionGroup("player")
-                    Stablemaster.Debug("  Player faction: " .. tostring(playerFaction))
+            if self.mountData and self.mountData.isCollected then
+                -- Ctrl+click for multi-select
+                if IsControlKeyDown() and self.scrollFrame and self.scrollFrame.selectedMounts then
+                    local mountID = self.mountData.id
+                    if self.scrollFrame.selectedMounts[mountID] then
+                        -- Deselect
+                        self.scrollFrame.selectedMounts[mountID] = nil
+                        UpdateMountButtonSelectionVisual(self, false)
+                    else
+                        -- Select
+                        self.scrollFrame.selectedMounts[mountID] = self.mountData
+                        UpdateMountButtonSelectionVisual(self, true)
+                    end
+                else
+                    -- Regular click - clear selections and debug
+                    if self.scrollFrame then
+                        StablemasterUI.ClearMountSelections(self.scrollFrame)
+                    end
+                    Stablemaster.Debug("Left-clicked: " .. self.mountData.name)
+                    -- Debug mount data for filtering issues
+                    if StablemasterDB and StablemasterDB.settings and StablemasterDB.settings.debugMode then
+                        local m = self.mountData
+                        Stablemaster.Debug("  Mount ID: " .. (m.id or "nil"))
+                        Stablemaster.Debug("  isUsable: " .. tostring(m.isUsable))
+                        Stablemaster.Debug("  isCollected: " .. tostring(m.isCollected))
+                        Stablemaster.Debug("  isFactionSpecific: " .. tostring(m.isFactionSpecific))
+                        Stablemaster.Debug("  faction: " .. tostring(m.faction))
+                        Stablemaster.Debug("  sourceType: " .. tostring(m.sourceType))
+
+                        -- Check what the game APIs return directly
+                        local name, spellID, icon, active, isUsable, sourceType, isFavorite, isFactionSpecific, faction, shouldHideOnChar, isCollected =
+                            C_MountJournal.GetMountInfoByID(m.id)
+                        Stablemaster.Debug("  API isUsable: " .. tostring(isUsable))
+                        Stablemaster.Debug("  API isFactionSpecific: " .. tostring(isFactionSpecific))
+                        Stablemaster.Debug("  API faction: " .. tostring(faction))
+
+                        local playerFaction = UnitFactionGroup("player")
+                        Stablemaster.Debug("  Player faction: " .. tostring(playerFaction))
+                    end
                 end
             end
         elseif mouseButton == "RightButton" then
@@ -359,12 +477,22 @@ function StablemasterUI.UpdateMountList(scrollFrame, showUnowned, searchText, so
             buttons[i] = button
         end
         button.mountData = mountData
+        button.scrollFrame = scrollFrame  -- Reference to parent for selection tracking
         button.icon:SetTexture(mountData.icon)
         button.name:SetText(mountData.name)
-        if mountData.isCollected then
+
+        -- Check if this mount is currently selected
+        local isSelected = scrollFrame.selectedMounts and scrollFrame.selectedMounts[mountData.id]
+        if isSelected then
+            UpdateMountButtonSelectionVisual(button, true)
+        elseif mountData.isCollected then
             button.name:SetTextColor(1, 1, 1, 1)
+            button:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+            button:SetBackdropBorderColor(unpack(STYLE.borderColor))
         else
             button.name:SetTextColor(0.6, 0.6, 0.6, 1)
+            button:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+            button:SetBackdropBorderColor(unpack(STYLE.borderColor))
         end
         button:Show()
     end
@@ -662,6 +790,14 @@ function StablemasterUI.GetPackFrameUnderCursor()
     if not _G.StablemasterMainFrame or not _G.StablemasterMainFrame.packPanel or not _G.StablemasterMainFrame.packPanel.packList then
         return nil
     end
+
+    -- First check if cursor is over an expanded pack content frame
+    local expandedContent = _G.StablemasterMainFrame.packPanel.packList.expandedContent
+    if expandedContent and expandedContent:IsVisible() and expandedContent:IsMouseOver() and expandedContent.pack then
+        return expandedContent
+    end
+
+    -- Then check collapsed pack frames
     local packFrames = _G.StablemasterMainFrame.packPanel.packList.packFrames
     for _, frame in ipairs(packFrames) do
         if frame:IsVisible() and frame:IsMouseOver() then

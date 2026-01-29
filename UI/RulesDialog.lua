@@ -317,6 +317,9 @@ local function RebuildRulesList(container, pack)
         elseif rule.type == "no_flying" then
             -- No flying rule
             text:SetText("No Flying Zone")
+        elseif rule.type == "flying_zone" then
+            -- Flying zone rule
+            text:SetText("Flying Zone")
         elseif rule.type == "in_party" then
             -- In party rule
             text:SetText("In Party")
@@ -645,14 +648,51 @@ function StablemasterUI.ShowRulesDialog(pack)
                 end
                 UIDropDownMenu_AddButton(info, level)
 
+                info.text = "Flying Zone"
+                info.func = function()
+                    CloseDropDownMenus()
+                    if not dlg.targetPack then return end
+
+                    -- Check if rule already exists
+                    if HasRuleOfType(dlg.targetPack, "flying_zone") then
+                        Stablemaster.Print("This pack already has a Flying Zone rule.")
+                        return
+                    end
+
+                    EnsureConditions(dlg.targetPack)
+                    table.insert(dlg.targetPack.conditions, {
+                        type = "flying_zone",
+                    })
+
+                    Stablemaster.VerbosePrint("Added flying zone rule.")
+                    RebuildRulesList(dlg.rulesList, dlg.targetPack)
+                    C_Timer.After(0.1, Stablemaster.SelectActivePack)
+                    if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                        _G.StablemasterMainFrame.packPanel.refreshPacks()
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+
                 info.text = "Dungeon..."
                 info.func = function()
                     CloseDropDownMenus()
-                    if dlg.instancePicker then
-                        dlg.instancePicker:Show()
+                    if dlg.dungeonPicker then
+                        dlg.dungeonPicker:Show()
                     else
-                        dlg.instancePicker = StablemasterUI.CreateInstancePicker(dlg)
-                        dlg.instancePicker:Show()
+                        dlg.dungeonPicker = StablemasterUI.CreateInstancePicker(dlg, false) -- false = dungeons
+                        dlg.dungeonPicker:Show()
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+
+                info.text = "Raid..."
+                info.func = function()
+                    CloseDropDownMenus()
+                    if dlg.raidPicker then
+                        dlg.raidPicker:Show()
+                    else
+                        dlg.raidPicker = StablemasterUI.CreateInstancePicker(dlg, true) -- true = raids
+                        dlg.raidPicker:Show()
                     end
                 end
                 UIDropDownMenu_AddButton(info, level)
@@ -1036,7 +1076,7 @@ function StablemasterUI.CreateZonePicker(parentDialog)
     zoneScroll:SetScrollChild(zoneContent)
 
     -- Add Zone button
-    local addBtn = StablemasterUI.CreateButton(picker, 80, STYLE.buttonHeight, "Add Zone")
+    local addBtn = StablemasterUI.CreateButton(picker, 100, STYLE.buttonHeight, "Add Zone")
     addBtn:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -STYLE.padding, STYLE.padding)
     addBtn:SetEnabled(false)
 
@@ -1045,9 +1085,27 @@ function StablemasterUI.CreateZonePicker(parentDialog)
     cancelBtn:SetPoint("RIGHT", addBtn, "LEFT", -8, 0)
     cancelBtn:SetScript("OnClick", function() picker:Hide() end)
 
-    -- Store state
-    picker.selectedMapID = nil
+    -- Store state for multi-select
+    picker.selectedZones = {}  -- Table of selected zones keyed by mapID
     picker.zoneButtons = {}
+
+    -- Helper to update add button text with count
+    local function UpdateAddButtonText()
+        local count = 0
+        for _ in pairs(picker.selectedZones) do
+            count = count + 1
+        end
+        if count == 0 then
+            addBtn:SetText("Add Zone")
+            addBtn:SetEnabled(false)
+        elseif count == 1 then
+            addBtn:SetText("Add 1 Zone")
+            addBtn:SetEnabled(true)
+        else
+            addBtn:SetText("Add " .. count .. " Zones")
+            addBtn:SetEnabled(true)
+        end
+    end
 
     -- Function to populate zone list
     local function PopulateZoneList(searchText)
@@ -1349,21 +1407,41 @@ function StablemasterUI.CreateZonePicker(parentDialog)
             -- Store item data
             btn.itemData = item
 
-            -- Click handler - BOTH continents and zones are now selectable
-            btn:SetScript("OnClick", function()
-                -- Clear previous selection
-                if picker.selectedButton then
-                    picker.selectedButton:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-                end
-                
-                -- Select this item (continent or zone)
-                picker.selectedMapID = item.mapID
-                picker.selectedButton = btn
-                btn:SetBackdropColor(0.2, 0.4, 0.2, 0.8) -- Green selection
-                addBtn:SetEnabled(true)
-            end)
+            -- Add checkbox for multi-select (both continents and zones)
+            local checkbox = CreateFrame("CheckButton", nil, btn, "UICheckButtonTemplate")
+            checkbox:SetSize(20, 20)
+            checkbox:SetPoint("LEFT", btn, "LEFT", indent + 4, 0)
+            checkbox:SetChecked(picker.selectedZones[item.mapID] ~= nil)
 
-            -- Right-click for continents expands/collapses (alternative to left-click selection)
+            -- Update text position to make room for checkbox
+            text:ClearAllPoints()
+            text:SetPoint("LEFT", checkbox, "RIGHT", 4, 0)
+            text:SetPoint("RIGHT", btn, "RIGHT", -30, 0)
+
+            btn.checkbox = checkbox
+
+            -- Toggle selection function
+            local function ToggleSelection()
+                if picker.selectedZones[item.mapID] then
+                    picker.selectedZones[item.mapID] = nil
+                    checkbox:SetChecked(false)
+                    btn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+                else
+                    picker.selectedZones[item.mapID] = item
+                    checkbox:SetChecked(true)
+                    btn:SetBackdropColor(0.2, 0.4, 0.2, 0.8) -- Green selection
+                end
+                UpdateAddButtonText()
+            end
+
+            checkbox:SetScript("OnClick", ToggleSelection)
+
+            -- Set initial visual state if already selected
+            if picker.selectedZones[item.mapID] then
+                btn:SetBackdropColor(0.2, 0.4, 0.2, 0.8)
+            end
+
+            -- Click handler - different for continents vs zones
             if item.type == "Continent" then
                 btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                 btn:SetScript("OnClick", function(self, mouseButton)
@@ -1372,38 +1450,37 @@ function StablemasterUI.CreateZonePicker(parentDialog)
                         picker.expandedContinents[item.mapID] = not picker.expandedContinents[item.mapID]
                         PopulateZoneList(searchBox:GetText())
                     else
-                        -- Left-click: Select continent
-                        if picker.selectedButton then
-                            picker.selectedButton:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-                        end
-                        picker.selectedMapID = item.mapID
-                        picker.selectedButton = btn
-                        btn:SetBackdropColor(0.2, 0.4, 0.2, 0.8) -- Green selection
-                        addBtn:SetEnabled(true)
+                        -- Left-click: Toggle selection
+                        ToggleSelection()
                     end
                 end)
+            else
+                -- Zone: left-click toggles selection
+                btn:SetScript("OnClick", ToggleSelection)
             end
 
             -- Hover effects
             btn:SetScript("OnEnter", function(self)
-                if self ~= picker.selectedButton then
+                local isSelected = picker.selectedZones[item.mapID]
+                if not isSelected then
                     if item.type == "Continent" then
                         self:SetBackdropColor(0.15, 0.15, 0.2, 0.8) -- Slightly different hover for continents
                     else
                         self:SetBackdropColor(0.2, 0.2, 0.2, 0.8)
                     end
                 end
-                
+
                 -- Show tooltip for continents explaining the click behavior
                 if item.type == "Continent" then
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:SetText("Left-click: Select entire continent")
+                    GameTooltip:SetText("Left-click: Select/deselect continent")
                     GameTooltip:AddLine("Right-click: Expand/collapse zones", 0.8, 0.8, 0.8)
                     GameTooltip:Show()
                 end
             end)
             btn:SetScript("OnLeave", function(self)
-                if self ~= picker.selectedButton then
+                local isSelected = picker.selectedZones[item.mapID]
+                if not isSelected then
                     self:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
                 end
                 GameTooltip:Hide()
@@ -1432,20 +1509,35 @@ function StablemasterUI.CreateZonePicker(parentDialog)
         PopulateZoneList(self:GetText())
     end)
 
-    -- Add button functionality
+    -- Add button functionality - adds all selected zones
     addBtn:SetScript("OnClick", function()
-        if picker.selectedMapID and parentDialog.targetPack then
+        local count = 0
+        for _ in pairs(picker.selectedZones) do
+            count = count + 1
+        end
+
+        if count > 0 and parentDialog.targetPack then
             EnsureConditions(parentDialog.targetPack)
-            table.insert(parentDialog.targetPack.conditions, {
-                type = "zone",
-                mapID = picker.selectedMapID,
-                includeParents = parentDialog.parentCheck:GetChecked() and true or false,
-            })
-            
-            local mapInfo = C_Map.GetMapInfo(picker.selectedMapID)
-            local zoneName = mapInfo and mapInfo.name or ("MapID " .. picker.selectedMapID)
-            Stablemaster.VerbosePrint("Added zone rule: " .. zoneName)
-            
+            local includeParents = parentDialog.parentCheck:GetChecked() and true or false
+
+            local addedNames = {}
+            for mapID, zone in pairs(picker.selectedZones) do
+                table.insert(parentDialog.targetPack.conditions, {
+                    type = "zone",
+                    mapID = mapID,
+                    includeParents = includeParents,
+                })
+                local mapInfo = C_Map.GetMapInfo(mapID)
+                local zoneName = mapInfo and mapInfo.name or ("MapID " .. mapID)
+                table.insert(addedNames, zoneName)
+            end
+
+            if #addedNames == 1 then
+                Stablemaster.VerbosePrint("Added zone rule: " .. addedNames[1])
+            else
+                Stablemaster.VerbosePrint("Added " .. #addedNames .. " zone rules: " .. table.concat(addedNames, ", "))
+            end
+
             RebuildRulesList(parentDialog.rulesList, parentDialog.targetPack)
             C_Timer.After(0.1, Stablemaster.SelectActivePack)
             -- Refresh the pack panel to show updated rule count
@@ -1467,9 +1559,8 @@ function StablemasterUI.CreateZonePicker(parentDialog)
         end
         table.insert(UISpecialFrames, "StablemasterZonePicker")
 
-        self.selectedMapID = nil
-        self.selectedButton = nil
-        addBtn:SetEnabled(false)
+        self.selectedZones = {}  -- Clear all selections
+        UpdateAddButtonText()
         searchBox:SetText("")
         PopulateZoneList("")
     end)
@@ -1479,9 +1570,13 @@ function StablemasterUI.CreateZonePicker(parentDialog)
     return picker
 end
 
--- Instance (Dungeon) Picker Dialog
-function StablemasterUI.CreateInstancePicker(parentDialog)
-    local picker = CreateFrame("Frame", "StablemasterInstancePicker", UIParent, "BackdropTemplate")
+-- Instance (Dungeon/Raid) Picker Dialog
+-- isRaid: false for dungeons, true for raids
+function StablemasterUI.CreateInstancePicker(parentDialog, isRaid)
+    local instanceType = isRaid and "Raid" or "Dungeon"
+    local pickerName = isRaid and "StablemasterRaidPicker" or "StablemasterDungeonPicker"
+
+    local picker = CreateFrame("Frame", pickerName, UIParent, "BackdropTemplate")
     picker:SetSize(450, 400)
     picker:SetPoint("CENTER", parentDialog, "CENTER", 50, 0)
     picker:SetMovable(true)
@@ -1490,6 +1585,9 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
     picker:SetFrameStrata("FULLSCREEN_DIALOG")
     picker:SetFrameLevel(parentDialog:GetFrameLevel() + 1)
     StablemasterUI.CreateDialogBackdrop(picker)
+
+    -- Store whether this is a raid picker
+    picker.isRaid = isRaid
 
     -- Intercept ESC to close just this dialog
     picker:SetScript("OnKeyDown", function(self, key)
@@ -1502,7 +1600,7 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
     end)
 
     -- Title bar
-    local titleBar = StablemasterUI.CreateTitleBar(picker, "Select Dungeon")
+    local titleBar = StablemasterUI.CreateTitleBar(picker, "Select " .. instanceType)
     picker.titleBar = titleBar
 
     -- Search box
@@ -1524,7 +1622,7 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
     instanceScroll:SetScrollChild(instanceContent)
 
     -- Add Instance button
-    local addBtn = StablemasterUI.CreateButton(picker, 100, STYLE.buttonHeight, "Add Dungeon")
+    local addBtn = StablemasterUI.CreateButton(picker, 100, STYLE.buttonHeight, "Add " .. instanceType)
     addBtn:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -STYLE.padding, STYLE.padding)
     addBtn:SetEnabled(false)
 
@@ -1533,9 +1631,27 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
     cancelBtn:SetPoint("RIGHT", addBtn, "LEFT", -8, 0)
     cancelBtn:SetScript("OnClick", function() picker:Hide() end)
 
-    -- Store state
-    picker.selectedInstance = nil
+    -- Store state for multi-select
+    picker.selectedInstances = {}  -- Table of selected instances keyed by instanceID
     picker.instanceButtons = {}
+
+    -- Helper to update add button text with count
+    local function UpdateAddButtonText()
+        local count = 0
+        for _ in pairs(picker.selectedInstances) do
+            count = count + 1
+        end
+        if count == 0 then
+            addBtn:SetText("Add " .. instanceType)
+            addBtn:SetEnabled(false)
+        elseif count == 1 then
+            addBtn:SetText("Add 1 " .. instanceType)
+            addBtn:SetEnabled(true)
+        else
+            addBtn:SetText("Add " .. count .. " " .. instanceType .. "s")
+            addBtn:SetEnabled(true)
+        end
+    end
 
     -- Function to populate instance list
     local function PopulateInstanceList(searchText)
@@ -1549,33 +1665,49 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
         -- Store expanded state
         picker.expandedTiers = picker.expandedTiers or {}
 
-        -- Get dungeon data from Encounter Journal
+        -- Get instance data from Encounter Journal (dungeons or raids based on picker.isRaid)
         local tierData = {}
         local numTiers = EJ_GetNumTiers()
+        local instanceTypeLabel = picker.isRaid and "Raid" or "Dungeon"
 
         for tierIndex = 1, numTiers do
             EJ_SelectTier(tierIndex)
             local tierName = EJ_GetTierInfo(tierIndex)
 
-            local dungeons = {}
+            local instances = {}
             local instanceIndex = 1
             while true do
-                local instanceID, name, description, bgImage, buttonImage, loreImage, dungeonAreaMapID, link, shouldDisplayDifficulty, mapID = EJ_GetInstanceByIndex(instanceIndex, false)
+                -- Second parameter: false = dungeons, true = raids
+                local instanceID, name, description, bgImage, buttonImage, loreImage, dungeonAreaMapID, link, shouldDisplayDifficulty, mapID = EJ_GetInstanceByIndex(instanceIndex, picker.isRaid)
                 if not instanceID then break end
 
-                table.insert(dungeons, {
-                    instanceID = instanceID,
-                    name = name,
-                    mapID = mapID
-                })
+                -- Filter out placeholder entries where instance name matches tier/expansion name
+                -- (e.g., "Midnight" appearing as a raid in the Midnight expansion)
+                local isValidInstance = true
+                if name and tierName then
+                    -- Check if instance name is the same as tier name or contained within it
+                    local lowerName = string.lower(name)
+                    local lowerTier = string.lower(tierName)
+                    if lowerName == lowerTier or string.find(lowerTier, lowerName, 1, true) then
+                        isValidInstance = false
+                    end
+                end
+
+                if isValidInstance then
+                    table.insert(instances, {
+                        instanceID = instanceID,
+                        name = name,
+                        mapID = mapID
+                    })
+                end
                 instanceIndex = instanceIndex + 1
             end
 
-            if #dungeons > 0 then
+            if #instances > 0 then
                 table.insert(tierData, {
                     tierIndex = tierIndex,
                     name = tierName,
-                    dungeons = dungeons
+                    instances = instances
                 })
             end
         end
@@ -1586,22 +1718,22 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
 
         for _, tier in ipairs(tierData) do
             local tierMatches = (searchText == "" or string.find(string.lower(tier.name), searchText))
-            local hasMatchingDungeons = false
+            local hasMatchingInstances = false
 
-            -- Check if any dungeons match search
-            local matchingDungeons = {}
-            for _, dungeon in ipairs(tier.dungeons) do
-                if searchText == "" or string.find(string.lower(dungeon.name), searchText) then
-                    hasMatchingDungeons = true
-                    table.insert(matchingDungeons, dungeon)
+            -- Check if any instances match search
+            local matchingInstances = {}
+            for _, instance in ipairs(tier.instances) do
+                if searchText == "" or string.find(string.lower(instance.name), searchText) then
+                    hasMatchingInstances = true
+                    table.insert(matchingInstances, instance)
                 end
             end
 
-            -- Sort matching dungeons
-            table.sort(matchingDungeons, function(a, b) return a.name < b.name end)
+            -- Sort matching instances
+            table.sort(matchingInstances, function(a, b) return a.name < b.name end)
 
-            -- Add tier if it matches or has matching dungeons
-            if tierMatches or hasMatchingDungeons then
+            -- Add tier if it matches or has matching instances
+            if tierMatches or hasMatchingInstances then
                 table.insert(displayItems, {
                     tierIndex = tier.tierIndex,
                     name = tier.name,
@@ -1610,14 +1742,14 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
                     isExpanded = picker.expandedTiers[tier.tierIndex]
                 })
 
-                -- Add dungeons if tier is expanded or we're searching
+                -- Add instances if tier is expanded or we're searching
                 if picker.expandedTiers[tier.tierIndex] or searchText ~= "" then
-                    for _, dungeon in ipairs(matchingDungeons) do
+                    for _, instance in ipairs(matchingInstances) do
                         table.insert(displayItems, {
-                            instanceID = dungeon.instanceID,
-                            name = dungeon.name,
-                            mapID = dungeon.mapID,
-                            type = "Dungeon",
+                            instanceID = instance.instanceID,
+                            name = instance.name,
+                            mapID = instance.mapID,
+                            type = instanceTypeLabel,
                             level = 1,
                             tierIndex = tier.tierIndex
                         })
@@ -1677,24 +1809,46 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
                     PopulateInstanceList(searchBox:GetText())
                 end)
             else
-                -- Dungeon selection
-                btn:SetScript("OnClick", function()
-                    -- Clear previous selection
-                    if picker.selectedButton then
-                        picker.selectedButton:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-                    end
+                -- Add checkbox for multi-select
+                local checkbox = CreateFrame("CheckButton", nil, btn, "UICheckButtonTemplate")
+                checkbox:SetSize(20, 20)
+                checkbox:SetPoint("LEFT", btn, "LEFT", indent + 4, 0)
+                checkbox:SetChecked(picker.selectedInstances[item.instanceID] ~= nil)
 
-                    -- Select this dungeon
-                    picker.selectedInstance = item
-                    picker.selectedButton = btn
-                    btn:SetBackdropColor(0.2, 0.4, 0.2, 0.8) -- Green selection
-                    addBtn:SetEnabled(true)
-                end)
+                -- Update text position to make room for checkbox
+                text:ClearAllPoints()
+                text:SetPoint("LEFT", checkbox, "RIGHT", 4, 0)
+                text:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
+
+                btn.checkbox = checkbox
+
+                -- Toggle selection on checkbox or row click
+                local function ToggleSelection()
+                    if picker.selectedInstances[item.instanceID] then
+                        picker.selectedInstances[item.instanceID] = nil
+                        checkbox:SetChecked(false)
+                        btn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+                    else
+                        picker.selectedInstances[item.instanceID] = item
+                        checkbox:SetChecked(true)
+                        btn:SetBackdropColor(0.2, 0.4, 0.2, 0.8) -- Green selection
+                    end
+                    UpdateAddButtonText()
+                end
+
+                checkbox:SetScript("OnClick", ToggleSelection)
+                btn:SetScript("OnClick", ToggleSelection)
+
+                -- Set initial visual state if already selected
+                if picker.selectedInstances[item.instanceID] then
+                    btn:SetBackdropColor(0.2, 0.4, 0.2, 0.8)
+                end
             end
 
             -- Hover effects
             btn:SetScript("OnEnter", function(self)
-                if self ~= picker.selectedButton then
+                local isSelected = item.type ~= "Tier" and picker.selectedInstances[item.instanceID]
+                if not isSelected then
                     if item.type == "Tier" then
                         self:SetBackdropColor(0.15, 0.15, 0.2, 0.8)
                     else
@@ -1710,7 +1864,8 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
                 end
             end)
             btn:SetScript("OnLeave", function(self)
-                if self ~= picker.selectedButton then
+                local isSelected = item.type ~= "Tier" and picker.selectedInstances[item.instanceID]
+                if not isSelected then
                     self:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
                 end
                 GameTooltip:Hide()
@@ -1739,18 +1894,32 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
         PopulateInstanceList(self:GetText())
     end)
 
-    -- Add button functionality
+    -- Add button functionality - adds all selected instances
     addBtn:SetScript("OnClick", function()
-        if picker.selectedInstance and parentDialog.targetPack then
-            EnsureConditions(parentDialog.targetPack)
-            table.insert(parentDialog.targetPack.conditions, {
-                type = "instance",
-                instanceID = picker.selectedInstance.instanceID,
-                instanceName = picker.selectedInstance.name,
-                mapID = picker.selectedInstance.mapID,
-            })
+        local count = 0
+        for _ in pairs(picker.selectedInstances) do
+            count = count + 1
+        end
 
-            Stablemaster.VerbosePrint("Added instance rule: " .. picker.selectedInstance.name)
+        if count > 0 and parentDialog.targetPack then
+            EnsureConditions(parentDialog.targetPack)
+
+            local addedNames = {}
+            for instanceID, instance in pairs(picker.selectedInstances) do
+                table.insert(parentDialog.targetPack.conditions, {
+                    type = "instance",
+                    instanceID = instance.instanceID,
+                    instanceName = instance.name,
+                    mapID = instance.mapID,
+                })
+                table.insert(addedNames, instance.name)
+            end
+
+            if #addedNames == 1 then
+                Stablemaster.VerbosePrint("Added instance rule: " .. addedNames[1])
+            else
+                Stablemaster.VerbosePrint("Added " .. #addedNames .. " instance rules: " .. table.concat(addedNames, ", "))
+            end
 
             RebuildRulesList(parentDialog.rulesList, parentDialog.targetPack)
             C_Timer.After(0.1, Stablemaster.SelectActivePack)
@@ -1766,22 +1935,21 @@ function StablemasterUI.CreateInstancePicker(parentDialog)
     picker:SetScript("OnShow", function(self)
         -- Move to end of UISpecialFrames so ESC closes this dialog first
         for i, name in ipairs(UISpecialFrames) do
-            if name == "StablemasterInstancePicker" then
+            if name == pickerName then
                 table.remove(UISpecialFrames, i)
                 break
             end
         end
-        table.insert(UISpecialFrames, "StablemasterInstancePicker")
+        table.insert(UISpecialFrames, pickerName)
 
-        self.selectedInstance = nil
-        self.selectedButton = nil
-        addBtn:SetEnabled(false)
+        self.selectedInstances = {}  -- Clear all selections
+        UpdateAddButtonText()
         searchBox:SetText("")
         PopulateInstanceList("")
     end)
 
     picker:Hide()
-    table.insert(UISpecialFrames, "StablemasterInstancePicker")
+    table.insert(UISpecialFrames, pickerName)
     return picker
 end
 

@@ -6,7 +6,7 @@ Stablemaster.runtime = Stablemaster.runtime or {
 }
 
 -- Version - update this when you change the .toc version
-Stablemaster.version = "1.1.2"
+Stablemaster.version = "1.2.0"
 
 function Stablemaster.CreatePack(name, description)
     if not name or name == "" then
@@ -27,6 +27,7 @@ function Stablemaster.CreatePack(name, description)
         name = name,
         description = description or "",
         mounts = {},
+        pets = {},
         conditions = {},
         created = time(),
         isShared = false, -- New packs default to character-specific
@@ -143,19 +144,27 @@ function Stablemaster.DuplicatePack(sourceName, newName, newDescription)
         name = newName,
         description = newDescription or (sourcePack.description .. " (Copy)"),
         mounts = {},
+        pets = {},
         conditions = {},
         created = time(),
         isShared = false, -- New duplicated packs default to character-specific
         isFallback = false, -- New duplicated packs cannot be fallback (only one fallback allowed)
     }
-    
+
     -- Deep copy mounts
     if sourcePack.mounts then
         for _, mountID in ipairs(sourcePack.mounts) do
             table.insert(duplicatedPack.mounts, mountID)
         end
     end
-    
+
+    -- Deep copy pets
+    if sourcePack.pets then
+        for _, petGUID in ipairs(sourcePack.pets) do
+            table.insert(duplicatedPack.pets, petGUID)
+        end
+    end
+
     -- Deep copy conditions
     if sourcePack.conditions then
         for _, condition in ipairs(sourcePack.conditions) do
@@ -297,6 +306,100 @@ function Stablemaster.GetOwnedMounts()
     table.sort(ownedMounts, function(a, b) return a.name < b.name end)
     return ownedMounts
 end
+
+-- ============================================================================
+-- Pet Management Functions
+-- ============================================================================
+
+function Stablemaster.AddPetToPack(packName, petGUID)
+    local pack = Stablemaster.GetPack(packName)
+    if not pack then
+        return false, "Pack '" .. packName .. "' not found"
+    end
+
+    -- Validate pet exists and is owned
+    local speciesID, customName, level, xp, maxXp, displayID, isFavorite, name, icon, petType =
+        C_PetJournal.GetPetInfoByPetID(petGUID)
+    if not speciesID then
+        return false, "Pet not found or not owned"
+    end
+
+    -- Ensure pack has pets array
+    if not pack.pets then
+        pack.pets = {}
+    end
+
+    -- Check if already exists
+    for _, existingPetGUID in ipairs(pack.pets) do
+        if existingPetGUID == petGUID then
+            local displayName = customName or name or "Unknown"
+            return false, "Pet '" .. displayName .. "' is already in pack '" .. packName .. "'"
+        end
+    end
+
+    table.insert(pack.pets, petGUID)
+    local displayName = customName or name or "Unknown"
+    Stablemaster.VerbosePrint("Added pet " .. displayName .. " to pack " .. packName)
+    return true, "Added '" .. displayName .. "' to pack '" .. packName .. "'"
+end
+
+function Stablemaster.RemovePetFromPack(packName, petGUID)
+    local pack = Stablemaster.GetPack(packName)
+    if not pack then
+        return false, "Pack '" .. packName .. "' not found"
+    end
+
+    if not pack.pets then
+        return false, "Pet not found in pack '" .. packName .. "'"
+    end
+
+    for i, existingGUID in ipairs(pack.pets) do
+        if existingGUID == petGUID then
+            table.remove(pack.pets, i)
+            -- Try to get pet name for feedback
+            local speciesID, customName, level, xp, maxXp, displayID, isFavorite, name =
+                C_PetJournal.GetPetInfoByPetID(petGUID)
+            local displayName = customName or name or "Unknown"
+            Stablemaster.VerbosePrint("Removed pet " .. displayName .. " from pack " .. packName)
+            return true, "Removed pet from pack '" .. packName .. "'"
+        end
+    end
+
+    return false, "Pet not found in pack '" .. packName .. "'"
+end
+
+function Stablemaster.GetOwnedPets()
+    local ownedPets = {}
+    local numPets, numOwned = C_PetJournal.GetNumPets()
+
+    for i = 1, numPets do
+        local petGUID, speciesID, owned, customName, level, favorite, isRevoked,
+              speciesName, icon, petType, companionID, tooltip, description,
+              isWild, canBattle, isTradeable, isUnique, obtainable = C_PetJournal.GetPetInfoByIndex(i)
+
+        if owned and petGUID then
+            table.insert(ownedPets, {
+                petGUID = petGUID,
+                speciesID = speciesID,
+                name = customName or speciesName,
+                speciesName = speciesName,
+                customName = customName,
+                icon = icon,
+                level = level,
+                petType = petType,
+                isFavorite = favorite,
+                canBattle = canBattle,
+            })
+        end
+    end
+
+    table.sort(ownedPets, function(a, b) return a.name < b.name end)
+    return ownedPets
+end
+
+-- ============================================================================
+-- End Pet Management Functions
+-- ============================================================================
 
 -- Get current best map for player
 local function GetPlayerMapID()
@@ -895,6 +998,19 @@ local function DoesRuleMatch(rule)
 
         Stablemaster.Debug("No flying rule: flying IS available here")
         return false, 0
+    elseif rule.type == "flying_zone" then
+        -- Flying zone rule: matches when flying IS available
+        local priority = StablemasterDB.settings.rulePriorities and StablemasterDB.settings.rulePriorities.flying_zone or 40
+
+        local canFly = IsFlyableArea()
+
+        if canFly then
+            Stablemaster.Debug("Flying zone rule matched - flying is available")
+            return true, priority
+        end
+
+        Stablemaster.Debug("Flying zone rule: flying NOT available here")
+        return false, 0
     elseif rule.type == "in_party" then
         -- In party rule: matches when in a party (but not a raid)
         local priority = StablemasterDB.settings.rulePriorities and StablemasterDB.settings.rulePriorities.in_party or 30
@@ -965,6 +1081,7 @@ local function ScorePackAgainstContext(pack)
     local holidayRules = {}
     local seasonRules = {}
     local noFlyingRules = {}
+    local flyingZoneRules = {}
     local groupRules = {}
     local instanceRules = {}
 
@@ -990,6 +1107,8 @@ local function ScorePackAgainstContext(pack)
             table.insert(seasonRules, {rule = rule, index = i})
         elseif rule.type == "no_flying" then
             table.insert(noFlyingRules, {rule = rule, index = i})
+        elseif rule.type == "flying_zone" then
+            table.insert(flyingZoneRules, {rule = rule, index = i})
         elseif rule.type == "in_party" or rule.type == "in_raid" then
             table.insert(groupRules, {rule = rule, index = i})
         elseif rule.type == "instance" then
@@ -1215,6 +1334,29 @@ local function ScorePackAgainstContext(pack)
         -- If we have no flying rules but none matched, pack doesn't qualify
         if not noFlyingMatched then
             Stablemaster.Debug("Pack '" .. pack.name .. "': no_flying rules exist but flying is available, returning 0")
+            return 0, {}
+        end
+    end
+
+    -- Flying zone rules: OR logic (any flying_zone rule match qualifies)
+    local flyingZoneMatched = false
+    if #flyingZoneRules > 0 then
+        for _, ruleData in ipairs(flyingZoneRules) do
+            local matched, score = DoesRuleMatch(ruleData.rule)
+            if matched then
+                flyingZoneMatched = true
+                totalScore = totalScore + score
+                table.insert(matchedRules, {
+                    type = ruleData.rule.type,
+                    score = score,
+                    index = ruleData.index
+                })
+            end
+        end
+
+        -- If we have flying zone rules but none matched, pack doesn't qualify
+        if not flyingZoneMatched then
+            Stablemaster.Debug("Pack '" .. pack.name .. "': flying_zone rules exist but flying is not available, returning 0")
             return 0, {}
         end
     end
@@ -1635,6 +1777,19 @@ function Stablemaster.MountActive()
         return true
     end
 
+    -- Check if we can mount at all in this area
+    if IsIndoors() then
+        Stablemaster.Debug("Cannot mount: indoors")
+        Stablemaster.VerbosePrint("Cannot mount indoors")
+        return false
+    end
+
+    if UnitAffectingCombat("player") then
+        Stablemaster.Debug("Cannot mount: in combat")
+        Stablemaster.VerbosePrint("Cannot mount while in combat")
+        return false
+    end
+
     local mountID = GetRandomMountFromSelectedPacks()
     local source = "rule-based packs"
     local packInfo = ""  -- this gets set later
@@ -1664,8 +1819,26 @@ function Stablemaster.MountActive()
         else
             -- Final fallback to WoW's random favorite mount system
             Stablemaster.Debug("No fallback pack or no mounts in fallback pack, using WoW's random favorite mount")
+
+            -- Check if there are any usable favorite mounts before attempting to summon
+            local hasUsableFavorite = false
+            local allMountIDs = C_MountJournal.GetMountIDs()
+            for _, checkMountID in ipairs(allMountIDs) do
+                local _, _, _, _, isUsable, _, isFavorite, _, _, _, isCollected = C_MountJournal.GetMountInfoByID(checkMountID)
+                if isCollected and isFavorite and isUsable then
+                    hasUsableFavorite = true
+                    break
+                end
+            end
+
+            if not hasUsableFavorite then
+                Stablemaster.Debug("No usable favorite mounts in this area")
+                Stablemaster.VerbosePrint("Cannot mount in this area")
+                return false
+            end
+
             C_MountJournal.SummonByID(0)
-            Stablemaster.Print("Summoned random favorite mount (using WoW's selection)")
+            Stablemaster.VerbosePrint("Summoning random favorite mount")
             return true
         end
     end
@@ -1683,6 +1856,178 @@ function Stablemaster_MountKeybind()
     -- Must be called from a hardware event (key press / macro)
     Stablemaster.MountActive()
 end
+
+-- ============================================================================
+-- Pet Summoning Functions
+-- ============================================================================
+
+-- Get a random pet from selected packs (similar to mount selection)
+local function GetRandomPetFromSelectedPacks()
+    local selectedPacks = Stablemaster.runtime.selectedPacks or {}
+
+    if #selectedPacks == 0 then
+        Stablemaster.Debug("No selected packs for pet selection")
+        return nil
+    end
+
+    local overlapMode = StablemasterDB.settings.packOverlapMode or "union"
+    local allPets = {}
+
+    if overlapMode == "union" then
+        -- Union: combine all pets from all matching packs
+        local seenPets = {}
+        for _, packData in ipairs(selectedPacks) do
+            local pack = packData.pack
+            if pack.pets then
+                for _, petGUID in ipairs(pack.pets) do
+                    if not seenPets[petGUID] then
+                        -- Verify pet still exists
+                        local speciesID = C_PetJournal.GetPetInfoByPetID(petGUID)
+                        if speciesID then
+                            table.insert(allPets, petGUID)
+                            seenPets[petGUID] = true
+                        end
+                    end
+                end
+            end
+        end
+    else
+        -- Intersection: only pets common to ALL matching packs
+        local firstPack = selectedPacks[1].pack
+        if not firstPack.pets or #firstPack.pets == 0 then
+            return nil
+        end
+
+        for _, petGUID in ipairs(firstPack.pets) do
+            local inAllPacks = true
+            for i = 2, #selectedPacks do
+                local otherPack = selectedPacks[i].pack
+                local found = false
+                if otherPack.pets then
+                    for _, otherPetGUID in ipairs(otherPack.pets) do
+                        if otherPetGUID == petGUID then
+                            found = true
+                            break
+                        end
+                    end
+                end
+                if not found then
+                    inAllPacks = false
+                    break
+                end
+            end
+            if inAllPacks then
+                -- Verify pet still exists
+                local speciesID = C_PetJournal.GetPetInfoByPetID(petGUID)
+                if speciesID then
+                    table.insert(allPets, petGUID)
+                end
+            end
+        end
+    end
+
+    if #allPets == 0 then
+        Stablemaster.Debug("No valid pets found in selected packs")
+        return nil
+    end
+
+    local idx = math.random(1, #allPets)
+    return allPets[idx]
+end
+
+-- Get a random pet from the fallback pack
+local function GetRandomPetFromFallbackPack()
+    local fallbackPack = Stablemaster.GetFallbackPack()
+    if not fallbackPack or not fallbackPack.pets or #fallbackPack.pets == 0 then
+        return nil
+    end
+
+    -- Filter to only valid pets
+    local validPets = {}
+    for _, petGUID in ipairs(fallbackPack.pets) do
+        local speciesID = C_PetJournal.GetPetInfoByPetID(petGUID)
+        if speciesID then
+            table.insert(validPets, petGUID)
+        end
+    end
+
+    if #validPets == 0 then
+        return nil
+    end
+
+    local idx = math.random(1, #validPets)
+    return validPets[idx]
+end
+
+function Stablemaster.PetActive()
+    Stablemaster.Debug("PetActive called")
+
+    -- If a pet is already summoned, dismiss it
+    local summonedPetGUID = C_PetJournal.GetSummonedPetGUID()
+    if summonedPetGUID then
+        Stablemaster.Debug("Pet already summoned, dismissing")
+        C_PetJournal.SummonPetByGUID(summonedPetGUID) -- Calling with same GUID dismisses
+        Stablemaster.VerbosePrint("Dismissing pet")
+        return true
+    end
+
+    -- Make sure we have current pack selection
+    Stablemaster.SelectActivePack()
+
+    local petGUID = GetRandomPetFromSelectedPacks()
+    local source = "rule-based packs"
+    local packInfo = ""
+
+    if petGUID then
+        -- We got a pet from rule-based selection
+        local selectedPacks = Stablemaster.runtime.selectedPacks or {}
+        if #selectedPacks > 1 then
+            local overlapMode = StablemasterDB.settings.packOverlapMode or "union"
+            if overlapMode == "intersection" then
+                packInfo = " from intersection of " .. #selectedPacks .. " packs"
+            else
+                packInfo = " from " .. #selectedPacks .. " packs"
+            end
+        elseif #selectedPacks == 1 then
+            packInfo = " from " .. selectedPacks[1].pack.name
+        end
+    else
+        -- Try fallback pack if no rule-based selection
+        Stablemaster.Debug("No pet from rule-based selection, trying fallback pack")
+        petGUID = GetRandomPetFromFallbackPack()
+
+        if petGUID then
+            local fallbackPack = Stablemaster.GetFallbackPack()
+            source = "fallback pack"
+            packInfo = " from fallback pack '" .. fallbackPack.name .. "'"
+        else
+            -- Final fallback to WoW's random favorite pet
+            Stablemaster.Debug("No fallback pack or no pets in fallback pack, using WoW's random favorite pet")
+            C_PetJournal.SummonRandomPet(true) -- true = favorites only
+            Stablemaster.VerbosePrint("Summoning random favorite pet")
+            return true
+        end
+    end
+
+    -- Summon the selected pet
+    local speciesID, customName, level, xp, maxXp, displayID, isFavorite, petName =
+        C_PetJournal.GetPetInfoByPetID(petGUID)
+    local displayName = customName or petName or "Unknown Pet"
+    Stablemaster.Debug("Summoning pet: " .. displayName .. packInfo)
+    Stablemaster.VerbosePrint("Summoning " .. displayName)
+    C_PetJournal.SummonPetByGUID(petGUID)
+    return true
+end
+
+-- Global wrapper for the pet keybind and macros
+function Stablemaster_PetKeybind()
+    -- Must be called from a hardware event (key press / macro)
+    Stablemaster.PetActive()
+end
+
+-- ============================================================================
+-- End Pet Summoning Functions
+-- ============================================================================
 
 -- Helper to get a random mount from the active pack (future use for a macro/keybind)
 function Stablemaster.GetRandomMountFromActivePack()
@@ -2049,9 +2394,10 @@ local function SlashHandler(msg)
         end)
     
     elseif command == "mount" then
-        if not Stablemaster.MountActive() then
-            Stablemaster.Print("Try creating a pack or favoriting a mount first.")
-        end
+        Stablemaster.MountActive()
+
+    elseif command == "pet" then
+        Stablemaster.PetActive()
 
     elseif command == "debug-mount-types" then
         StablemasterUI.DebugMountTypes()
@@ -2285,6 +2631,8 @@ local function SlashHandler(msg)
         Stablemaster.Print("/stablemaster remove <pack> <mount_id> - Remove mount from pack")
         Stablemaster.Print("/stablemaster mounts - Show your first 10 mounts")
         Stablemaster.Print("/stablemaster findmount <search> - Search for mounts")
+        Stablemaster.Print("/stablemaster mount - Summon a random mount from active pack")
+        Stablemaster.Print("/stablemaster pet - Summon a random pet from active pack")
         Stablemaster.Print("/stablemaster status - Show addon status")
         Stablemaster.Print("/stablemaster packs-status - Show matching packs and scores")
         Stablemaster.Print("/stablemaster debug-outfit - Show current outfit and outfit rules info")

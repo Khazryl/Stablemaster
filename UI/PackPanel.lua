@@ -164,7 +164,11 @@ function StablemasterUI.CreatePackFrame(parent, pack)
     info:SetPoint("RIGHT", frame, "RIGHT", -100, 0)
 
     local mountCount = #pack.mounts
+    local petCount = pack.pets and #pack.pets or 0
     local infoText = mountCount .. " mount" .. (mountCount == 1 and "" or "s")
+    if petCount > 0 then
+        infoText = infoText .. ", " .. petCount .. " pet" .. (petCount == 1 and "" or "s")
+    end
     if pack.description and pack.description ~= "" then
         infoText = infoText .. " - " .. pack.description
     end
@@ -189,11 +193,13 @@ function StablemasterUI.CreatePackFrame(parent, pack)
             holiday = STYLE.textDim,
             season = STYLE.textDim,
             no_flying = STYLE.ruleZone,
+            flying_zone = STYLE.ruleZone,
             in_party = STYLE.textDim,
             in_raid = STYLE.textDim,
             instance = STYLE.ruleZone,
         }
-        local ruleNames = {
+        -- Singular and plural forms for rule names
+        local ruleNamesSingular = {
             zone = "zone",
             transmog = "transmog",
             custom_transmog = "custom",
@@ -203,20 +209,39 @@ function StablemasterUI.CreatePackFrame(parent, pack)
             holiday = "holiday",
             season = "season",
             no_flying = "Non-Flying Zones",
+            flying_zone = "Flying Zones",
             in_party = "Party",
             in_raid = "Raid",
             instance = "instance",
+            outfit = "outfit",
+        }
+        local ruleNamesPlural = {
+            zone = "zones",
+            transmog = "transmogs",
+            custom_transmog = "customs",
+            class = "classes",
+            race = "races",
+            time = "times",
+            holiday = "holidays",
+            season = "seasons",
+            no_flying = "Non-Flying Zones",
+            flying_zone = "Flying Zones",
+            in_party = "Party",
+            in_raid = "Raid",
+            instance = "instances",
+            outfit = "outfits",
         }
         -- Rules that should show just the name without count
         local noCountRules = {
             no_flying = true,
+            flying_zone = true,
             in_party = true,
             in_raid = true,
         }
 
         for ruleType, count in pairs(ruleTypeCounts) do
             local color = ruleColors[ruleType] or STYLE.text
-            local typeName = ruleNames[ruleType] or ruleType
+            local typeName = count == 1 and (ruleNamesSingular[ruleType] or ruleType) or (ruleNamesPlural[ruleType] or ruleType)
             local colorHex = string.format("|cff%02x%02x%02x", color[1]*255, color[2]*255, color[3]*255)
             if noCountRules[ruleType] then
                 table.insert(ruleDetails, colorHex .. typeName .. "|r")
@@ -398,6 +423,7 @@ function StablemasterUI.TogglePackExpansion(packFrame, pack)
                 packPanel.tempExpandedFrame = nil
             end
             if packPanel.packList then
+                packPanel.packList.expandedContent = nil  -- Clear expanded content reference
                 packPanel.packList:Show()
             end
         end
@@ -470,7 +496,11 @@ function StablemasterUI.TogglePackExpansion(packFrame, pack)
             info:SetPoint("RIGHT", expandedContent, "RIGHT", -STYLE.padding, 0)
 
             local mountCount = #pack.mounts
+            local petCount = pack.pets and #pack.pets or 0
             local infoText = mountCount .. " mount" .. (mountCount == 1 and "" or "s")
+            if petCount > 0 then
+                infoText = infoText .. ", " .. petCount .. " pet" .. (petCount == 1 and "" or "s")
+            end
             if pack.description and pack.description ~= "" then
                 infoText = infoText .. " - " .. pack.description
             end
@@ -479,11 +509,6 @@ function StablemasterUI.TogglePackExpansion(packFrame, pack)
             end
             info:SetText(infoText)
             expandedContent.infoText = info
-
-            -- Tip text
-            local tipText = StablemasterUI.CreateText(expandedContent, STYLE.fontSizeSmall, STYLE.textDim)
-            tipText:SetPoint("TOPLEFT", info, "BOTTOMLEFT", 0, -2)
-            tipText:SetText("Ctrl+Click to remove mount")
 
             -- Click handler
             expandedContent:EnableMouse(true)
@@ -500,8 +525,114 @@ function StablemasterUI.TogglePackExpansion(packFrame, pack)
             expandedContent:Show()
             expandedScrollFrame:Show()
 
-            -- Add mounts
-            if #pack.mounts > 0 then
+            local yOffset = -55
+            local hasMounts = #pack.mounts > 0
+            local hasPets = pack.pets and #pack.pets > 0
+
+            -- TAB SYSTEM FOR MOUNTS/PETS
+            local tabContainer = CreateFrame("Frame", nil, expandedContent)
+            tabContainer:SetPoint("TOPLEFT", expandedContent, "TOPLEFT", STYLE.padding, yOffset)
+            tabContainer:SetSize(290, 24)
+
+            local activeTab = "mounts"
+            expandedContent.activeTab = activeTab
+
+            -- Mounts tab button
+            local mountsTab = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
+            mountsTab:SetSize(140, 24)
+            mountsTab:SetPoint("LEFT", tabContainer, "LEFT", 0, 0)
+            StablemasterUI.CreateBackdrop(mountsTab, 0.5)
+
+            local mountsTabText = StablemasterUI.CreateText(mountsTab, STYLE.fontSizeNormal, STYLE.accent)
+            mountsTabText:SetPoint("CENTER", mountsTab, "CENTER", 0, 0)
+            local mountCount = #pack.mounts
+            mountsTabText:SetText("Mounts (" .. mountCount .. ")")
+            mountsTab.text = mountsTabText
+
+            -- Pets tab button
+            local petsTab = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
+            petsTab:SetSize(140, 24)
+            petsTab:SetPoint("LEFT", mountsTab, "RIGHT", 6, 0)
+            StablemasterUI.CreateBackdrop(petsTab, 0.5)
+
+            local petsTabText = StablemasterUI.CreateText(petsTab, STYLE.fontSizeNormal, STYLE.textDim)
+            petsTabText:SetPoint("CENTER", petsTab, "CENTER", 0, 0)
+            local petCount = pack.pets and #pack.pets or 0
+            petsTabText:SetText("Pets (" .. petCount .. ")")
+            petsTab.text = petsTabText
+
+            -- Tip text (below tabs)
+            local tipText = StablemasterUI.CreateText(expandedContent, STYLE.fontSizeSmall, STYLE.textDim)
+            tipText:SetPoint("TOPLEFT", tabContainer, "BOTTOMLEFT", 0, -4)
+            tipText:SetText("Ctrl+Click to remove")
+
+            yOffset = yOffset - 48  -- Space for tabs + tip text
+
+            -- Mounts content container
+            local mountsContent = CreateFrame("Frame", nil, expandedContent)
+            mountsContent:SetPoint("TOPLEFT", expandedContent, "TOPLEFT", STYLE.padding, yOffset)
+            mountsContent:SetSize(290, 1)  -- Height will be dynamic
+            expandedContent.mountsContent = mountsContent
+
+            -- Pets content container
+            local petsContent = CreateFrame("Frame", nil, expandedContent)
+            petsContent:SetPoint("TOPLEFT", expandedContent, "TOPLEFT", STYLE.padding, yOffset)
+            petsContent:SetSize(290, 1)
+            petsContent:Hide()  -- Start hidden
+            expandedContent.petsContent = petsContent
+
+            -- Function to update tab appearance
+            local function updateTabAppearance()
+                if expandedContent.activeTab == "mounts" then
+                    mountsTab:SetBackdropBorderColor(unpack(STYLE.accent))
+                    mountsTabText:SetTextColor(unpack(STYLE.accent))
+                    petsTab:SetBackdropBorderColor(unpack(STYLE.borderColor))
+                    petsTabText:SetTextColor(unpack(STYLE.textDim))
+                    mountsContent:Show()
+                    petsContent:Hide()
+                else
+                    mountsTab:SetBackdropBorderColor(unpack(STYLE.borderColor))
+                    mountsTabText:SetTextColor(unpack(STYLE.textDim))
+                    petsTab:SetBackdropBorderColor(unpack(STYLE.accent))
+                    petsTabText:SetTextColor(unpack(STYLE.accent))
+                    mountsContent:Hide()
+                    petsContent:Show()
+                end
+            end
+
+            -- Tab click handlers
+            mountsTab:SetScript("OnClick", function()
+                expandedContent.activeTab = "mounts"
+                updateTabAppearance()
+            end)
+
+            petsTab:SetScript("OnClick", function()
+                expandedContent.activeTab = "pets"
+                updateTabAppearance()
+            end)
+
+            -- Tab hover effects
+            mountsTab:SetScript("OnEnter", function(self)
+                if expandedContent.activeTab ~= "mounts" then
+                    self:SetBackdropBorderColor(STYLE.accent[1]*0.6, STYLE.accent[2]*0.6, STYLE.accent[3]*0.6, 1)
+                end
+            end)
+            mountsTab:SetScript("OnLeave", function(self)
+                updateTabAppearance()
+            end)
+
+            petsTab:SetScript("OnEnter", function(self)
+                if expandedContent.activeTab ~= "pets" then
+                    self:SetBackdropBorderColor(STYLE.accent[1]*0.6, STYLE.accent[2]*0.6, STYLE.accent[3]*0.6, 1)
+                end
+            end)
+            petsTab:SetScript("OnLeave", function(self)
+                updateTabAppearance()
+            end)
+
+            -- MOUNTS CONTENT
+            local mountYOffset = 0
+            if hasMounts then
                 local sortedMounts = {}
                 for _, mountID in ipairs(pack.mounts) do
                     local mountName = C_MountJournal.GetMountInfoByID(mountID)
@@ -515,11 +646,10 @@ function StablemasterUI.TogglePackExpansion(packFrame, pack)
                     return a.name < b.name
                 end)
 
-                local yOffset = -55
                 for i, mountData in ipairs(sortedMounts) do
-                    local mountFrame = CreateFrame("Frame", nil, expandedContent, "BackdropTemplate")
+                    local mountFrame = CreateFrame("Frame", nil, mountsContent, "BackdropTemplate")
                     mountFrame:SetSize(290, 28)
-                    mountFrame:SetPoint("TOPLEFT", expandedContent, "TOPLEFT", STYLE.padding, yOffset)
+                    mountFrame:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, mountYOffset)
                     StablemasterUI.CreateBackdrop(mountFrame, 0.3)
 
                     local mountName, spellID, icon = C_MountJournal.GetMountInfoByID(mountData.id)
@@ -587,19 +717,156 @@ function StablemasterUI.TogglePackExpansion(packFrame, pack)
 
                     mountFrame:Show()
                     expandedContent.mountFrames[i] = mountFrame
-                    yOffset = yOffset - 30
+                    mountYOffset = mountYOffset - 30
                 end
-
-                local contentHeight = 55 + (#sortedMounts * 30) + STYLE.padding
-                expandedContent:SetHeight(contentHeight)
             else
-                local noMountsText = StablemasterUI.CreateText(expandedContent, STYLE.fontSizeNormal, STYLE.textDim)
-                noMountsText:SetPoint("TOPLEFT", tipText, "BOTTOMLEFT", STYLE.padding, -4)
+                local noMountsText = StablemasterUI.CreateText(mountsContent, STYLE.fontSizeNormal, STYLE.textDim)
+                noMountsText:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 10, mountYOffset)
                 noMountsText:SetText("No mounts in this pack")
-                expandedContent:SetHeight(95)
+                mountYOffset = mountYOffset - 20
             end
 
+            -- PETS CONTENT
+            local petYOffset = 0
+            expandedContent.petFrames = {}
+            if hasPets then
+                local sortedPets = {}
+                for _, petGUID in ipairs(pack.pets) do
+                    local speciesID, customName, level, xp, maxXp, displayID, isFavorite, petName, icon =
+                        C_PetJournal.GetPetInfoByPetID(petGUID)
+                    if speciesID then
+                        table.insert(sortedPets, {
+                            petGUID = petGUID,
+                            name = customName or petName or "Unknown Pet",
+                            icon = icon,
+                            level = level
+                        })
+                    end
+                end
+
+                table.sort(sortedPets, function(a, b)
+                    return a.name < b.name
+                end)
+
+                for i, petData in ipairs(sortedPets) do
+                    local petFrame = CreateFrame("Frame", nil, petsContent, "BackdropTemplate")
+                    petFrame:SetSize(290, 28)
+                    petFrame:SetPoint("TOPLEFT", petsContent, "TOPLEFT", 0, petYOffset)
+                    StablemasterUI.CreateBackdrop(petFrame, 0.3)
+
+                    -- Pet icon
+                    local petIcon = petFrame:CreateTexture(nil, "ARTWORK")
+                    petIcon:SetSize(22, 22)
+                    petIcon:SetPoint("LEFT", petFrame, "LEFT", 4, 0)
+                    petIcon:SetTexture(petData.icon)
+
+                    -- Pet name
+                    local petNameText = StablemasterUI.CreateText(petFrame, STYLE.fontSizeNormal, STYLE.text)
+                    petNameText:SetPoint("LEFT", petIcon, "RIGHT", 6, 0)
+                    local displayText = petData.name
+                    if petData.level then
+                        displayText = displayText .. " (Lvl " .. petData.level .. ")"
+                    end
+                    petNameText:SetText(displayText)
+
+                    -- Click and hover
+                    petFrame:EnableMouse(true)
+                    local isHovering = false
+
+                    local function updatePetHoverState()
+                        if isHovering then
+                            if IsControlKeyDown() then
+                                petFrame:SetBackdropColor(STYLE.error[1]*0.3, STYLE.error[2]*0.3, STYLE.error[3]*0.3, 0.8)
+                                petFrame:SetBackdropBorderColor(unpack(STYLE.error))
+                                petNameText:SetTextColor(unpack(STYLE.error))
+                            else
+                                petFrame:SetBackdropBorderColor(unpack(STYLE.accent))
+                                petNameText:SetTextColor(unpack(STYLE.accent))
+                            end
+                        else
+                            petFrame:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.3)
+                            petFrame:SetBackdropBorderColor(unpack(STYLE.borderColor))
+                            petNameText:SetTextColor(unpack(STYLE.text))
+                        end
+                    end
+
+                    petFrame:SetScript("OnEnter", function(self)
+                        isHovering = true
+                        updatePetHoverState()
+
+                        -- Show tooltip and model flyout
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:SetCompanionPet(petData.petGUID)
+                        GameTooltip:Show()
+
+                        StablemasterUI.ShowPetModelFlyout(petData)
+                    end)
+
+                    petFrame:SetScript("OnLeave", function(self)
+                        isHovering = false
+                        updatePetHoverState()
+                        GameTooltip:Hide()
+
+                        -- Delay hiding the flyout to allow moving mouse to it
+                        C_Timer.After(0.5, function()
+                            if self:IsMouseOver() then
+                                return
+                            end
+                            local shouldHide = true
+                            if _G.StablemasterPetModelFlyout and _G.StablemasterPetModelFlyout.isMouseOver then
+                                shouldHide = false
+                            end
+                            if shouldHide then
+                                StablemasterUI.HidePetModelFlyout()
+                            end
+                        end)
+                    end)
+
+                    petFrame:SetScript("OnUpdate", function(self)
+                        if isHovering then
+                            updatePetHoverState()
+                        end
+                    end)
+
+                    petFrame:SetScript("OnMouseUp", function(self, button)
+                        if button == "LeftButton" and IsControlKeyDown() then
+                            local success, message = Stablemaster.RemovePetFromPack(pack.name, petData.petGUID)
+                            if success then
+                                Stablemaster.VerbosePrint("Removed " .. petData.name .. " from pack " .. pack.name)
+                                StablemasterUI.TogglePackExpansion(expandedContent, pack)
+                                StablemasterUI.TogglePackExpansion(expandedContent, pack)
+                            else
+                                Stablemaster.Print("Error: " .. message)
+                            end
+                        end
+                    end)
+
+                    petFrame:Show()
+                    expandedContent.petFrames[i] = petFrame
+                    petYOffset = petYOffset - 30
+                end
+            else
+                local noPetsText = StablemasterUI.CreateText(petsContent, STYLE.fontSizeNormal, STYLE.textDim)
+                noPetsText:SetPoint("TOPLEFT", petsContent, "TOPLEFT", 10, petYOffset)
+                noPetsText:SetText("No pets in this pack")
+                petYOffset = petYOffset - 20
+            end
+
+            -- Calculate content height based on the larger of the two sections
+            local mountSectionHeight = hasMounts and (#pack.mounts * 30) or 20
+            local petSectionHeight = hasPets and (#pack.pets * 30) or 20
+            local maxSectionHeight = math.max(mountSectionHeight, petSectionHeight)
+            local contentHeight = 55 + 48 + maxSectionHeight + STYLE.padding  -- 48 = tabs + tip
+            expandedContent:SetHeight(contentHeight)
+
+            -- Initial tab appearance
+            updateTabAppearance()
+
             packPanel.tempExpandedFrame = expandedScrollFrame
+            -- Store expandedContent on packList so GetPackFrameUnderCursor can find it
+            if packPanel.packList then
+                packPanel.packList.expandedContent = expandedContent
+            end
 
             if StablemasterDB and StablemasterDB.settings and StablemasterDB.settings.debugMode then
                 Stablemaster.Debug("Created scrollable expansion with " .. #pack.mounts .. " mounts")
