@@ -198,7 +198,8 @@ function StablemasterUI.CreatePackFrame(parent, pack)
             in_raid = STYLE.textDim,
             instance = STYLE.ruleZone,
         }
-        local ruleNames = {
+        -- Singular and plural forms for rule names
+        local ruleNamesSingular = {
             zone = "zone",
             transmog = "transmog",
             custom_transmog = "custom",
@@ -212,6 +213,23 @@ function StablemasterUI.CreatePackFrame(parent, pack)
             in_party = "Party",
             in_raid = "Raid",
             instance = "instance",
+            outfit = "outfit",
+        }
+        local ruleNamesPlural = {
+            zone = "zones",
+            transmog = "transmogs",
+            custom_transmog = "customs",
+            class = "classes",
+            race = "races",
+            time = "times",
+            holiday = "holidays",
+            season = "seasons",
+            no_flying = "Non-Flying Zones",
+            flying_zone = "Flying Zones",
+            in_party = "Party",
+            in_raid = "Raid",
+            instance = "instances",
+            outfit = "outfits",
         }
         -- Rules that should show just the name without count
         local noCountRules = {
@@ -223,7 +241,7 @@ function StablemasterUI.CreatePackFrame(parent, pack)
 
         for ruleType, count in pairs(ruleTypeCounts) do
             local color = ruleColors[ruleType] or STYLE.text
-            local typeName = ruleNames[ruleType] or ruleType
+            local typeName = count == 1 and (ruleNamesSingular[ruleType] or ruleType) or (ruleNamesPlural[ruleType] or ruleType)
             local colorHex = string.format("|cff%02x%02x%02x", color[1]*255, color[2]*255, color[3]*255)
             if noCountRules[ruleType] then
                 table.insert(ruleDetails, colorHex .. typeName .. "|r")
@@ -405,6 +423,7 @@ function StablemasterUI.TogglePackExpansion(packFrame, pack)
                 packPanel.tempExpandedFrame = nil
             end
             if packPanel.packList then
+                packPanel.packList.expandedContent = nil  -- Clear expanded content reference
                 packPanel.packList:Show()
             end
         end
@@ -844,6 +863,10 @@ function StablemasterUI.TogglePackExpansion(packFrame, pack)
             updateTabAppearance()
 
             packPanel.tempExpandedFrame = expandedScrollFrame
+            -- Store expandedContent on packList so GetPackFrameUnderCursor can find it
+            if packPanel.packList then
+                packPanel.packList.expandedContent = expandedContent
+            end
 
             if StablemasterDB and StablemasterDB.settings and StablemasterDB.settings.debugMode then
                 Stablemaster.Debug("Created scrollable expansion with " .. #pack.mounts .. " mounts")

@@ -1,8 +1,8 @@
 ## Interface: 110200, 110205, 120000
 ## Title: Stablemaster
-## Notes: Create and manage mount sets for different criteria.
+## Notes: Create and manage mount (and pet!) sets based around activation rules.
 ## Author: Khazryl
-## Version: 1.1.2
+## Version: 1.2.0
 ## IconTexture: Interface\Icons\Ability_Mount_RidingHorse
 ## SavedVariables: StablemasterDB
 

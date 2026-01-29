@@ -56,7 +56,32 @@ function StablemasterUI.CreatePetList(parent)
 
     scrollFrame.content = content
     scrollFrame.buttons = {}
+    scrollFrame.selectedPets = {}  -- Track multi-selected pets by petGUID
     return scrollFrame
+end
+
+-- Helper to update pet button visual state based on selection
+local function UpdatePetButtonSelectionVisual(button, isSelected)
+    if isSelected then
+        button:SetBackdropColor(0.2, 0.5, 0.2, 0.8)  -- Green for selected
+        button:SetBackdropBorderColor(0.3, 0.8, 0.3, 1)
+    else
+        button:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+        button:SetBackdropBorderColor(unpack(STYLE.borderColor))
+    end
+end
+
+-- Helper to clear all pet selections
+function StablemasterUI.ClearPetSelections(scrollFrame)
+    if scrollFrame and scrollFrame.selectedPets then
+        wipe(scrollFrame.selectedPets)
+        -- Update visuals for all buttons
+        for _, btn in ipairs(scrollFrame.buttons) do
+            if btn.petData then
+                UpdatePetButtonSelectionVisual(btn, false)
+            end
+        end
+    end
 end
 
 function StablemasterUI.CreatePetButton(parent, index)
@@ -86,8 +111,16 @@ function StablemasterUI.CreatePetButton(parent, index)
     button.name = name
 
     button:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(STYLE.accent[1] * 0.15, STYLE.accent[2] * 0.15, STYLE.accent[3] * 0.15, 0.8)
-        self:SetBackdropBorderColor(unpack(STYLE.accent))
+        -- Check if this pet is selected
+        local isSelected = self.scrollFrame and self.scrollFrame.selectedPets and
+                          self.petData and self.scrollFrame.selectedPets[self.petData.petGUID]
+        if isSelected then
+            self:SetBackdropColor(0.25, 0.6, 0.25, 0.9)  -- Brighter green on hover when selected
+            self:SetBackdropBorderColor(0.4, 0.9, 0.4, 1)
+        else
+            self:SetBackdropColor(STYLE.accent[1] * 0.15, STYLE.accent[2] * 0.15, STYLE.accent[3] * 0.15, 0.8)
+            self:SetBackdropBorderColor(unpack(STYLE.accent))
+        end
 
         if self.petData then
             -- Show enhanced tooltip with 3D model (same as mount list behavior)
@@ -95,27 +128,65 @@ function StablemasterUI.CreatePetButton(parent, index)
         end
     end)
     button:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
-        self:SetBackdropBorderColor(unpack(STYLE.borderColor))
+        -- Check if this pet is selected
+        local isSelected = self.scrollFrame and self.scrollFrame.selectedPets and
+                          self.petData and self.scrollFrame.selectedPets[self.petData.petGUID]
+        if isSelected then
+            self:SetBackdropColor(0.2, 0.5, 0.2, 0.8)  -- Green for selected
+            self:SetBackdropBorderColor(0.3, 0.8, 0.3, 1)
+        else
+            self:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+            self:SetBackdropBorderColor(unpack(STYLE.borderColor))
+        end
         StablemasterUI.HidePetTooltip()
     end)
 
     button:SetScript("OnDragStart", function(self)
         if self.petData and self.petData.petGUID then
+            -- Build list of pets to drag (selected ones + current if not selected)
+            local petsToDrag = {}
+            local hasSelections = self.scrollFrame and self.scrollFrame.selectedPets and next(self.scrollFrame.selectedPets)
+
+            if hasSelections then
+                -- If there are selections, use them (include current pet if not already selected)
+                for petGUID, petData in pairs(self.scrollFrame.selectedPets) do
+                    table.insert(petsToDrag, petData)
+                end
+                -- If current pet isn't in selection, add it
+                if not self.scrollFrame.selectedPets[self.petData.petGUID] then
+                    table.insert(petsToDrag, self.petData)
+                end
+            else
+                -- No selections, just drag the current pet
+                table.insert(petsToDrag, self.petData)
+            end
+
+            self.petsToDrag = petsToDrag
+
             local dragFrame = CreateFrame("Frame", nil, UIParent)
-            dragFrame:SetSize(200, 30)
             dragFrame:SetFrameStrata("TOOLTIP")
             dragFrame:SetAlpha(0.8)
 
-            local dragIcon = dragFrame:CreateTexture(nil, "ARTWORK")
-            dragIcon:SetSize(24, 24)
-            dragIcon:SetPoint("LEFT", dragFrame, "LEFT", 0, 0)
-            dragIcon:SetTexture(self.petData.icon)
+            if #petsToDrag == 1 then
+                -- Single pet drag display
+                dragFrame:SetSize(200, 30)
+                local dragIcon = dragFrame:CreateTexture(nil, "ARTWORK")
+                dragIcon:SetSize(24, 24)
+                dragIcon:SetPoint("LEFT", dragFrame, "LEFT", 0, 0)
+                dragIcon:SetTexture(petsToDrag[1].icon)
 
-            local dragText = dragFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            dragText:SetPoint("LEFT", dragIcon, "RIGHT", 4, 0)
-            dragText:SetText(self.petData.name)
-            dragText:SetTextColor(1, 1, 1, 1)
+                local dragText = dragFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                dragText:SetPoint("LEFT", dragIcon, "RIGHT", 4, 0)
+                dragText:SetText(petsToDrag[1].name)
+                dragText:SetTextColor(1, 1, 1, 1)
+            else
+                -- Multi-pet drag display
+                dragFrame:SetSize(200, 30)
+                local dragText = dragFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                dragText:SetPoint("CENTER", dragFrame, "CENTER", 0, 0)
+                dragText:SetText("|cff00ff00" .. #petsToDrag .. " pets|r")
+                dragText:SetTextColor(1, 1, 1, 1)
+            end
 
             dragFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", GetCursorPosition() / UIParent:GetEffectiveScale())
 
@@ -126,6 +197,7 @@ function StablemasterUI.CreatePetButton(parent, index)
                 if self.isDragging then
                     local x, y = GetCursorPosition()
                     local scale = UIParent:GetEffectiveScale()
+                    dragFrame:ClearAllPoints()
                     dragFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
                     C_Timer.After(0.01, UpdateDragPosition)
                 end
@@ -143,21 +215,67 @@ function StablemasterUI.CreatePetButton(parent, index)
             end
             local packFrame = StablemasterUI.GetPackFrameUnderCursor()
             if packFrame and packFrame.pack then
-                local success, message = Stablemaster.AddPetToPack(packFrame.pack.name, self.petData.petGUID)
-                Stablemaster.VerbosePrint(message)
-                if success then
-                    if _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
+                local pack = packFrame.pack
+                local isExpandedView = packFrame.isExpanded == true
+                local petsToDrag = self.petsToDrag or {self.petData}
+                local successCount = 0
+                local addedNames = {}
+
+                for _, petData in ipairs(petsToDrag) do
+                    local success, message = Stablemaster.AddPetToPack(pack.name, petData.petGUID)
+                    if success then
+                        successCount = successCount + 1
+                        table.insert(addedNames, petData.name)
+                    end
+                end
+
+                if successCount > 0 then
+                    if successCount == 1 then
+                        Stablemaster.VerbosePrint("Added " .. addedNames[1] .. " to pack " .. pack.name)
+                    else
+                        Stablemaster.VerbosePrint("Added " .. successCount .. " pets to pack " .. pack.name)
+                    end
+
+                    -- Clear selections after successful drop
+                    if self.scrollFrame then
+                        StablemasterUI.ClearPetSelections(self.scrollFrame)
+                    end
+
+                    if isExpandedView then
+                        -- Refresh the expanded view by re-toggling it (close and reopen)
+                        StablemasterUI.TogglePackExpansion(packFrame, pack)
+                        StablemasterUI.TogglePackExpansion(packFrame, pack)
+                    elseif _G.StablemasterMainFrame and _G.StablemasterMainFrame.packPanel and _G.StablemasterMainFrame.packPanel.refreshPacks then
                         _G.StablemasterMainFrame.packPanel.refreshPacks()
                     end
                 end
             end
+            self.petsToDrag = nil
         end
     end)
 
     button:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "LeftButton" then
-            if self.petData then
-                Stablemaster.Debug("Left-clicked pet: " .. self.petData.name)
+            if self.petData and self.petData.petGUID then
+                -- Ctrl+click for multi-select
+                if IsControlKeyDown() and self.scrollFrame and self.scrollFrame.selectedPets then
+                    local petGUID = self.petData.petGUID
+                    if self.scrollFrame.selectedPets[petGUID] then
+                        -- Deselect
+                        self.scrollFrame.selectedPets[petGUID] = nil
+                        UpdatePetButtonSelectionVisual(self, false)
+                    else
+                        -- Select
+                        self.scrollFrame.selectedPets[petGUID] = self.petData
+                        UpdatePetButtonSelectionVisual(self, true)
+                    end
+                else
+                    -- Regular click - clear selections and debug
+                    if self.scrollFrame then
+                        StablemasterUI.ClearPetSelections(self.scrollFrame)
+                    end
+                    Stablemaster.Debug("Left-clicked pet: " .. self.petData.name)
+                end
             end
         elseif mouseButton == "RightButton" then
             if self.petData and self.petData.petGUID then
@@ -228,6 +346,36 @@ function StablemasterUI.UpdatePetList(scrollFrame, filters)
         pets = filtered
     end
 
+    -- Deduplicate by species - only show one of each pet type
+    -- Prioritize: favorites first, then highest level
+    local seenSpecies = {}
+    local deduplicated = {}
+
+    -- First pass: sort by priority (favorite > level) so we keep the best one
+    table.sort(pets, function(a, b)
+        -- Favorites first
+        if a.isFavorite and not b.isFavorite then return true end
+        if b.isFavorite and not a.isFavorite then return false end
+        -- Then by level (higher first)
+        local levelA = a.level or 0
+        local levelB = b.level or 0
+        if levelA ~= levelB then return levelA > levelB end
+        -- Then by name
+        return a.name < b.name
+    end)
+
+    -- Second pass: keep only first of each species
+    for _, p in ipairs(pets) do
+        if p.speciesID and not seenSpecies[p.speciesID] then
+            seenSpecies[p.speciesID] = true
+            table.insert(deduplicated, p)
+        elseif not p.speciesID then
+            -- Keep pets without speciesID (shouldn't happen, but just in case)
+            table.insert(deduplicated, p)
+        end
+    end
+    pets = deduplicated
+
     -- Sort alphabetically
     table.sort(pets, function(a, b) return a.name < b.name end)
 
@@ -240,6 +388,7 @@ function StablemasterUI.UpdatePetList(scrollFrame, filters)
             buttons[i] = button
         end
         button.petData = petData
+        button.scrollFrame = scrollFrame  -- Reference to parent for selection tracking
         button.icon:SetTexture(petData.icon)
         button.name:SetText(petData.name)
 
@@ -250,9 +399,17 @@ function StablemasterUI.UpdatePetList(scrollFrame, filters)
             button.levelText:SetText("")
         end
 
-        -- Color name by quality if we have it
-        -- Note: quality isn't directly available from GetPetInfoByIndex, default to white
-        button.name:SetTextColor(1, 1, 1, 1)
+        -- Check if this pet is currently selected
+        local isSelected = scrollFrame.selectedPets and scrollFrame.selectedPets[petData.petGUID]
+        if isSelected then
+            UpdatePetButtonSelectionVisual(button, true)
+        else
+            -- Color name by quality if we have it
+            -- Note: quality isn't directly available from GetPetInfoByIndex, default to white
+            button.name:SetTextColor(1, 1, 1, 1)
+            button:SetBackdropColor(STYLE.bgColor[1], STYLE.bgColor[2], STYLE.bgColor[3], 0.6)
+            button:SetBackdropBorderColor(unpack(STYLE.borderColor))
+        end
 
         button:Show()
     end

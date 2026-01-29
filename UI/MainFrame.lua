@@ -142,13 +142,13 @@ function StablemasterUI.CreateSettingsPanel(parent)
     -- Left column: Pack Overlap Mode
     local overlapLabel = StablemasterUI.CreateText(settingsPanel, STYLE.fontSizeSmall, STYLE.textDim)
     overlapLabel:SetPoint("TOPLEFT", settingsTitle, "BOTTOMLEFT", 0, -6)
-    overlapLabel:SetText("When multiple packs match, choose a mount from:")
+    overlapLabel:SetText("When multiple packs match, choose a mount/pet from:")
 
     local unionRadio = StablemasterUI.CreateRadioButton(settingsPanel, "Any matching pack")
     unionRadio:SetPoint("TOPLEFT", overlapLabel, "BOTTOMLEFT", 0, -2)
     unionRadio:SetSize(160, 18)
 
-    local intersectionRadio = StablemasterUI.CreateRadioButton(settingsPanel, "Mounts common to all matching packs")
+    local intersectionRadio = StablemasterUI.CreateRadioButton(settingsPanel, "Mounts/pets common to all matching packs")
     intersectionRadio:SetPoint("TOPLEFT", unionRadio, "BOTTOMLEFT", 0, 0)
     intersectionRadio:SetSize(160, 18)
 
