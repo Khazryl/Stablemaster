@@ -6,7 +6,7 @@ Stablemaster.runtime = Stablemaster.runtime or {
 }
 
 -- Version - update this when you change the .toc version
-Stablemaster.version = "1.2.0"
+Stablemaster.version = "1.2.1"
 
 function Stablemaster.CreatePack(name, description)
     if not name or name == "" then
@@ -894,8 +894,35 @@ local function DoesRuleMatch(rule)
 
         for _, raceID in ipairs(rule.raceIDs) do
             if raceID == playerRaceID then
-                Stablemaster.Debug("Race rule matched!")
-                return true, priority
+                -- Race matches, now check form requirement if specified
+                if rule.formRequirement then
+                    -- Check if player has alternate form capability (Worgen, Dracthyr)
+                    local hasAlternateForm, inAlternateForm = C_PlayerInfo.GetAlternateFormInfo()
+                    if hasAlternateForm then
+                        -- inAlternateForm = true means human form (Worgen) or visage form (Dracthyr)
+                        -- inAlternateForm = false means worgen form or dragon form
+                        if rule.formRequirement == "alternate" and inAlternateForm then
+                            -- Wants alternate form (human/visage) and player is in it
+                            Stablemaster.Debug("Race rule matched with alternate form (human/visage)!")
+                            return true, priority
+                        elseif rule.formRequirement == "true" and not inAlternateForm then
+                            -- Wants true form (worgen/dragon) and player is in it
+                            Stablemaster.Debug("Race rule matched with true form (worgen/dragon)!")
+                            return true, priority
+                        else
+                            Stablemaster.Debug("Race rule: form requirement not met (wants " .. rule.formRequirement .. ", inAlternateForm=" .. tostring(inAlternateForm) .. ")")
+                            return false, 0
+                        end
+                    else
+                        -- Player doesn't have alternate form, rule shouldn't match
+                        Stablemaster.Debug("Race rule: form requirement specified but player has no alternate form")
+                        return false, 0
+                    end
+                else
+                    -- No form requirement, just match the race
+                    Stablemaster.Debug("Race rule matched!")
+                    return true, priority
+                end
             end
         end
         Stablemaster.Debug("Race rule: player race " .. playerRaceID .. " not in rule races")

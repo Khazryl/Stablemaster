@@ -237,14 +237,31 @@ local function RebuildRulesList(container, pack)
         elseif rule.type == "race" then
             local raceNames = {}
             local seenNames = {}
+            local hasWorgen, hasDracthyr = false, false
             for _, raceID in ipairs(rule.raceIDs or {}) do
                 local raceInfo = C_CreatureInfo.GetRaceInfo(raceID)
                 if raceInfo and not seenNames[raceInfo.raceName] then
                     seenNames[raceInfo.raceName] = true
                     table.insert(raceNames, raceInfo.raceName)
                 end
+                -- Track which race types are in this rule
+                if raceID == 22 then hasWorgen = true end
+                if raceID == 52 or raceID == 70 then hasDracthyr = true end
             end
             local raceText = #raceNames > 0 and table.concat(raceNames, ", ") or "None"
+            -- Add form requirement if specified (use race-specific terminology)
+            if rule.formRequirement then
+                local formText
+                if hasWorgen and not hasDracthyr then
+                    formText = rule.formRequirement == "alternate" and "Human" or "Worgen"
+                elseif hasDracthyr and not hasWorgen then
+                    formText = rule.formRequirement == "alternate" and "Visage" or "Dracthyr"
+                else
+                    -- Mixed or unknown, use generic
+                    formText = rule.formRequirement == "alternate" and "Human/Visage" or "Worgen/Dracthyr"
+                end
+                raceText = raceText .. " (" .. formText .. " form)"
+            end
             text:SetText("Race: " .. raceText)
         elseif rule.type == "outfit" then
             -- Outfit rule (Midnight 12.0+) - supports both single and multi-outfit formats
@@ -2658,10 +2675,10 @@ function StablemasterUI.CreateClassPicker(parentDialog)
     return picker
 end
 
--- Race Picker Dialog
+-- Race Picker Dialog (with expandable form options for Worgen/Dracthyr)
 function StablemasterUI.CreateRacePicker(parentDialog)
     local picker = CreateFrame("Frame", "StablemasterRacePicker", UIParent, "BackdropTemplate")
-    picker:SetSize(400, 450)
+    picker:SetSize(400, 500)
     picker:SetPoint("CENTER", parentDialog, "CENTER", 50, 0)
     picker:SetMovable(true)
     picker:EnableMouse(true)
@@ -2687,15 +2704,15 @@ function StablemasterUI.CreateRacePicker(parentDialog)
     -- Instructions
     local instructionText = StablemasterUI.CreateText(picker, STYLE.fontSizeSmall, STYLE.textDim)
     instructionText:SetPoint("TOPLEFT", picker, "TOPLEFT", STYLE.padding, -STYLE.headerHeight - STYLE.padding)
-    instructionText:SetText("Select one or more races for this rule.")
+    instructionText:SetText("Select races. Click [+] on Worgen/Dracthyr to choose specific forms.")
 
     -- Scroll frame for race list
     local raceScroll = CreateFrame("ScrollFrame", nil, picker, "UIPanelScrollFrameTemplate")
     raceScroll:SetPoint("TOPLEFT", instructionText, "BOTTOMLEFT", 0, -10)
-    raceScroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -50, 50)
+    raceScroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -26, 45)
 
     local raceContent = CreateFrame("Frame", nil, raceScroll)
-    raceContent:SetSize(330, 1)
+    raceContent:SetSize(350, 1)
     raceScroll:SetScrollChild(raceContent)
 
     -- Add Rule button
@@ -2709,8 +2726,41 @@ function StablemasterUI.CreateRacePicker(parentDialog)
     cancelBtn:SetScript("OnClick", function() picker:Hide() end)
 
     -- Store state
-    picker.selectedRaces = {} -- { [raceID] = true }
+    picker.selectedRaces = {}    -- { [raceID] = raceIDs array }
+    picker.selectedForms = {}    -- { [raceID] = "alternate" | "true" | nil (any) }
+    picker.expandedRaces = {}    -- { [raceID] = true } for showing form options
     picker.raceRows = {}
+
+    -- Race IDs that have alternate forms
+    local WORGEN_RACE_ID = 22
+    local DRACTHYR_RACE_IDS = {52, 70}  -- Alliance and Horde Dracthyr
+
+    local function HasAlternateForm(raceID)
+        if raceID == WORGEN_RACE_ID then return true, "Worgen" end
+        for _, dracthyrID in ipairs(DRACTHYR_RACE_IDS) do
+            if raceID == dracthyrID then return true, "Dracthyr" end
+        end
+        return false, nil
+    end
+
+    -- Get form options specific to a race
+    local function GetFormOptions(raceID)
+        local _, raceType = HasAlternateForm(raceID)
+        if raceType == "Worgen" then
+            return {
+                { id = nil, name = "Any Form" },
+                { id = "alternate", name = "Human Form" },
+                { id = "true", name = "Worgen Form" },
+            }
+        elseif raceType == "Dracthyr" then
+            return {
+                { id = nil, name = "Any Form" },
+                { id = "alternate", name = "Visage Form" },
+                { id = "true", name = "Dracthyr Form" },
+            }
+        end
+        return {}
+    end
 
     -- Get all playable races
     local raceData = {}
@@ -2795,7 +2845,7 @@ function StablemasterUI.CreateRacePicker(parentDialog)
                 currentFaction = raceInfo.faction
 
                 local headerRow = CreateFrame("Frame", nil, raceContent)
-                headerRow:SetSize(330, 22)
+                headerRow:SetSize(350, 22)
                 headerRow:SetPoint("TOPLEFT", raceContent, "TOPLEFT", 0, y)
 
                 local headerText = headerRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2815,9 +2865,11 @@ function StablemasterUI.CreateRacePicker(parentDialog)
                 y = y - 24
             end
 
+            local hasAltForm = HasAlternateForm(raceInfo.raceID)
+
             -- Race row
             local raceRow = CreateFrame("Frame", nil, raceContent, "BackdropTemplate")
-            raceRow:SetSize(320, 26)
+            raceRow:SetSize(340, 28)
             raceRow:SetPoint("TOPLEFT", raceContent, "TOPLEFT", 10, y)
             StablemasterUI.CreateBackdrop(raceRow, 0.6)
 
@@ -2845,12 +2897,50 @@ function StablemasterUI.CreateRacePicker(parentDialog)
                     self:SetBackdropBorderColor(unpack(STYLE.borderColor))
                 end
             end
-            raceCheck:SetChecked(picker.selectedRaces[raceInfo.raceID] or false)
+            raceCheck:SetChecked(picker.selectedRaces[raceInfo.raceID] ~= nil)
             UpdateRaceCheckVisuals(raceCheck)
+
+            -- Expand button for form options (only for Worgen/Dracthyr)
+            local expandBtn = nil
+            local textLeftAnchor = raceCheck
+
+            if hasAltForm then
+                expandBtn = CreateFrame("Button", nil, raceRow, "BackdropTemplate")
+                expandBtn:SetSize(16, 16)
+                expandBtn:SetPoint("LEFT", raceCheck, "RIGHT", 6, 0)
+                StablemasterUI.CreateBackdrop(expandBtn, 0.4)
+
+                local expandText = expandBtn:CreateFontString(nil, "OVERLAY")
+                expandText:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+                expandText:SetPoint("CENTER", 0, 1)
+                expandText:SetTextColor(unpack(STYLE.accent))
+                if picker.expandedRaces[raceInfo.raceID] then
+                    expandText:SetText("-")
+                else
+                    expandText:SetText("+")
+                end
+                expandBtn.expandText = expandText
+
+                -- Expand button handler
+                expandBtn:SetScript("OnClick", function()
+                    picker.expandedRaces[raceInfo.raceID] = not picker.expandedRaces[raceInfo.raceID]
+                    PopulateRaceList()
+                end)
+
+                -- Expand button hover effect
+                expandBtn:SetScript("OnEnter", function(self)
+                    self:SetBackdropBorderColor(unpack(STYLE.accent))
+                end)
+                expandBtn:SetScript("OnLeave", function(self)
+                    self:SetBackdropBorderColor(unpack(STYLE.borderColor))
+                end)
+
+                textLeftAnchor = expandBtn
+            end
 
             -- Race name
             local raceText = StablemasterUI.CreateText(raceRow, STYLE.fontSizeNormal, STYLE.text)
-            raceText:SetPoint("LEFT", raceCheck, "RIGHT", 8, 0)
+            raceText:SetPoint("LEFT", textLeftAnchor, "RIGHT", 8, 0)
             raceText:SetText(raceInfo.name)
 
             -- Checkbox handler
@@ -2858,6 +2948,10 @@ function StablemasterUI.CreateRacePicker(parentDialog)
                 UpdateRaceCheckVisuals(self)
                 -- Store the full raceIDs array (for neutral races with multiple IDs)
                 picker.selectedRaces[raceInfo.raceID] = self:GetChecked() and raceInfo.raceIDs or nil
+                -- If unchecking, clear form selection for this race
+                if not self:GetChecked() then
+                    picker.selectedForms[raceInfo.raceID] = nil
+                end
                 -- Update add button state
                 local hasSelection = false
                 for _ in pairs(picker.selectedRaces) do
@@ -2865,10 +2959,72 @@ function StablemasterUI.CreateRacePicker(parentDialog)
                     break
                 end
                 addBtn:SetEnabled(hasSelection)
+                PopulateRaceList()  -- Refresh to update form display
             end)
 
             table.insert(picker.raceRows, raceRow)
-            y = y - 28
+            y = y - 30
+
+            -- Show form options if expanded (only for Worgen/Dracthyr)
+            if hasAltForm and picker.expandedRaces[raceInfo.raceID] then
+                local raceFormOptions = GetFormOptions(raceInfo.raceID)
+                for _, formOption in ipairs(raceFormOptions) do
+                    local formRow = CreateFrame("Frame", nil, raceContent, "BackdropTemplate")
+                    formRow:SetSize(320, 24)
+                    formRow:SetPoint("TOPLEFT", raceContent, "TOPLEFT", 30, y)
+                    StablemasterUI.CreateBackdrop(formRow, 0.4)
+
+                    -- Form checkbox (modern style)
+                    local formCheck = CreateFrame("CheckButton", nil, formRow, "BackdropTemplate")
+                    formCheck:SetSize(14, 14)
+                    formCheck:SetPoint("LEFT", formRow, "LEFT", 8, 0)
+                    StablemasterUI.CreateBackdrop(formCheck, 0.6)
+
+                    local formCheckmark = formCheck:CreateTexture(nil, "OVERLAY")
+                    formCheckmark:SetSize(10, 10)
+                    formCheckmark:SetPoint("CENTER")
+                    formCheckmark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+                    formCheckmark:SetDesaturated(true)
+                    formCheckmark:SetVertexColor(unpack(STYLE.accent))
+                    formCheckmark:Hide()
+                    formCheck.checkmark = formCheckmark
+
+                    local function UpdateFormCheckVisuals(self)
+                        if self:GetChecked() then
+                            self.checkmark:Show()
+                            self:SetBackdropBorderColor(unpack(STYLE.accent))
+                        else
+                            self.checkmark:Hide()
+                            self:SetBackdropBorderColor(unpack(STYLE.borderColor))
+                        end
+                    end
+
+                    -- Check if this form is selected (nil matches nil for "Any Form")
+                    local isSelected = picker.selectedForms[raceInfo.raceID] == formOption.id
+                    formCheck:SetChecked(isSelected)
+                    UpdateFormCheckVisuals(formCheck)
+
+                    -- Form name
+                    local formText = StablemasterUI.CreateText(formRow, STYLE.fontSizeSmall, STYLE.text)
+                    formText:SetPoint("LEFT", formCheck, "RIGHT", 8, 0)
+                    formText:SetText(formOption.name)
+
+                    -- Form checkbox handler (radio button behavior)
+                    formCheck:SetScript("OnClick", function(self)
+                        -- Set this form, clear others (radio button style)
+                        picker.selectedForms[raceInfo.raceID] = formOption.id
+                        -- If selecting a specific form, ensure the race is also selected
+                        if not picker.selectedRaces[raceInfo.raceID] then
+                            picker.selectedRaces[raceInfo.raceID] = raceInfo.raceIDs
+                            addBtn:SetEnabled(true)
+                        end
+                        PopulateRaceList()  -- Refresh to update checkboxes
+                    end)
+
+                    table.insert(picker.raceRows, formRow)
+                    y = y - 26
+                end
+            end
         end
 
         -- Update content height
@@ -2890,38 +3046,85 @@ function StablemasterUI.CreateRacePicker(parentDialog)
     addBtn:SetScript("OnClick", function()
         if not parentDialog.targetPack then return end
 
-        -- Build raceIDs array (flatten all selected race ID arrays)
-        local raceIDs = {}
-        for _, raceIDsArray in pairs(picker.selectedRaces) do
-            for _, raceID in ipairs(raceIDsArray) do
-                table.insert(raceIDs, raceID)
-            end
+        -- Check if we have any selections
+        local hasSelection = false
+        for _ in pairs(picker.selectedRaces) do
+            hasSelection = true
+            break
         end
-
-        if #raceIDs == 0 then
+        if not hasSelection then
             Stablemaster.Print("Please select at least one race.")
             return
         end
 
-        -- Add the rule
         EnsureConditions(parentDialog.targetPack)
-        table.insert(parentDialog.targetPack.conditions, {
-            type = "race",
-            raceIDs = raceIDs,
-        })
 
-        -- Build description for message (deduplicate names for neutral races)
-        local raceNames = {}
-        local seenNames = {}
-        for _, raceID in ipairs(raceIDs) do
-            local raceInfo = C_CreatureInfo.GetRaceInfo(raceID)
-            if raceInfo and not seenNames[raceInfo.raceName] then
-                seenNames[raceInfo.raceName] = true
-                table.insert(raceNames, raceInfo.raceName)
+        -- Group races by their form requirement
+        local racesByForm = {}  -- { [formRequirement or "none"] = { raceIDs = {}, names = {} } }
+
+        for primaryRaceID, raceIDsArray in pairs(picker.selectedRaces) do
+            local formReq = picker.selectedForms[primaryRaceID]
+            local formKey = formReq or "none"
+
+            if not racesByForm[formKey] then
+                racesByForm[formKey] = { raceIDs = {}, names = {} }
+            end
+
+            -- Add all race IDs for this race
+            for _, raceID in ipairs(raceIDsArray) do
+                table.insert(racesByForm[formKey].raceIDs, raceID)
+            end
+
+            -- Get race name for message (deduplicate)
+            local raceInfo = C_CreatureInfo.GetRaceInfo(primaryRaceID)
+            if raceInfo then
+                local alreadyAdded = false
+                for _, name in ipairs(racesByForm[formKey].names) do
+                    if name == raceInfo.raceName then
+                        alreadyAdded = true
+                        break
+                    end
+                end
+                if not alreadyAdded then
+                    table.insert(racesByForm[formKey].names, raceInfo.raceName)
+                end
             end
         end
 
-        Stablemaster.VerbosePrint("Added race rule: " .. table.concat(raceNames, ", "))
+        -- Create a rule for each form requirement group
+        local allMessages = {}
+        for formKey, data in pairs(racesByForm) do
+            local newRule = {
+                type = "race",
+                raceIDs = data.raceIDs,
+            }
+            -- Add form requirement if not "none" (any form)
+            if formKey ~= "none" then
+                newRule.formRequirement = formKey
+            end
+            table.insert(parentDialog.targetPack.conditions, newRule)
+
+            -- Build message for this rule (use race-specific terminology)
+            local formDesc = ""
+            if formKey ~= "none" then
+                -- Detect which race type based on IDs
+                local hasWorgen, hasDracthyr = false, false
+                for _, raceID in ipairs(data.raceIDs) do
+                    if raceID == 22 then hasWorgen = true end
+                    if raceID == 52 or raceID == 70 then hasDracthyr = true end
+                end
+                if hasWorgen and not hasDracthyr then
+                    formDesc = formKey == "alternate" and " (Human Form)" or " (Worgen Form)"
+                elseif hasDracthyr and not hasWorgen then
+                    formDesc = formKey == "alternate" and " (Visage Form)" or " (Dracthyr Form)"
+                else
+                    formDesc = formKey == "alternate" and " (Human/Visage Form)" or " (Worgen/Dracthyr Form)"
+                end
+            end
+            table.insert(allMessages, table.concat(data.names, ", ") .. formDesc)
+        end
+
+        Stablemaster.VerbosePrint("Added race rule: " .. table.concat(allMessages, "; "))
 
         RebuildRulesList(parentDialog.rulesList, parentDialog.targetPack)
         C_Timer.After(0.1, Stablemaster.SelectActivePack)
@@ -2946,6 +3149,8 @@ function StablemasterUI.CreateRacePicker(parentDialog)
         table.insert(UISpecialFrames, "StablemasterRacePicker")
 
         self.selectedRaces = {}
+        self.selectedForms = {}
+        self.expandedRaces = {}
         addBtn:SetEnabled(false)
         PopulateRaceList()
     end)
